@@ -1,0 +1,19 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    # 文件模式(持久化,重启数据保留)
+    url: jdbc:duckdb:./data/app.duckdb
+    # 内存模式(程序退出数据即丢失):url: jdbc:duckdb:
+    driver-class-name: org.duckdb.DuckDBDriver
+    username: ""
+    password: ""
+    # DuckDB 是嵌入式单写者引擎,连接池不宜开大
+    hikari:
+      maximum-pool-size: 1
+      minimum-idle: 1
+  ai:
+    chat:
+      turns: 10
+
