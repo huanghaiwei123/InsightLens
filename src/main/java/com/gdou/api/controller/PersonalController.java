@@ -1,7 +1,7 @@
 package com.gdou.api.controller;
 
-import com.gdou.agent.common.Result;
-import com.gdou.agent.constant.CodeConstant;
+import com.gdou.api.common.Result;
+import com.gdou.api.constant.CodeConstant;
 import com.gdou.infra.LlmClient;
 import jakarta.annotation.Resource;
 

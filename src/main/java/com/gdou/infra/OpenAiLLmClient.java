@@ -7,7 +7,7 @@ import com.alibaba.cloud.ai.graph.checkpoint.savers.MemorySaver;
 import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import com.alibaba.cloud.ai.graph.streaming.OutputType;
 import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
-import com.gdou.agent.hook.CustomStopConditionHook;
+import com.gdou.api.hook.CustomStopConditionHook;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -15,6 +15,7 @@ import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -45,8 +46,8 @@ public class OpenAiLLmClient implements LlmClient {
                 )
                 .build();
        StringBuilder systemMessage=new StringBuilder();
-       try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream("message/SystemMessage.txt")))) {
-          String line;
+       try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(new ClassPathResource("message/SystemMessage.txt").getFile())))) {
+           String line;
           while(true) {
               line = reader.readLine();
               if(line == null) break;

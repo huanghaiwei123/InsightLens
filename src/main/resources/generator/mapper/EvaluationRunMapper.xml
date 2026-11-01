@@ -2,7 +2,7 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.gdou.agent.mapper.EvaluationRunMapper">
+<mapper namespace="com.gdou.api.mapper.EvaluationRunMapper">
 
     <resultMap id="BaseResultMap" type="com.gdou.meta.entity.EvaluationRun">
             <id property="id" column="id" />

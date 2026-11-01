@@ -31,3 +31,8 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### 运行产物
+identifier.db
+identifier.db.wal
+data/
