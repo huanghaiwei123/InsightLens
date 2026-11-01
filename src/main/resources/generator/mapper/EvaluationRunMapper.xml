@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.gdou.agent.mapper.EvaluationRunMapper">
+
+    <resultMap id="BaseResultMap" type="com.gdou.meta.entity.EvaluationRun">
+            <id property="id" column="id" />
+            <result property="createdAt" column="created_at" />
+            <result property="model" column="model" />
+            <result property="codeCommit" column="code_commit" />
+            <result property="totalCases" column="total_cases" />
+            <result property="passCount" column="pass_count" />
+            <result property="failCount" column="fail_count" />
+            <result property="accuracy" column="accuracy" />
+            <result property="hallucinationCount" column="hallucination_count" />
+            <result property="writeOpBlockedCount" column="write_op_blocked_count" />
+            <result property="avgLatencyMs" column="avg_latency_ms" />
+            <result property="p95LatencyMs" column="p95_latency_ms" />
+            <result property="totalCostYuan" column="total_cost_yuan" />
+            <result property="notes" column="notes" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,created_at,model,code_commit,total_cases,pass_count,
+        fail_count,accuracy,hallucination_count,write_op_blocked_count,avg_latency_ms,
+        p95_latency_ms,total_cost_yuan,notes
+    </sql>
+</mapper>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.gdou.agent.mapper.EvalCaseResultMapper">
+
+    <resultMap id="BaseResultMap" type="com.gdou.meta.entity.EvalCaseResult">
+            <id property="id" column="id" />
+            <result property="runId" column="run_id" />
+            <result property="caseId" column="case_id" />
+            <result property="question" column="question" />
+            <result property="difficulty" column="difficulty" />
+            <result property="generatedSql" column="generated_sql" />
+            <result property="goldSql" column="gold_sql" />
+            <result property="executionMatch" column="execution_match" />
+            <result property="isHallucination" column="is_hallucination" />
+            <result property="writeOpBlocked" column="write_op_blocked" />
+            <result property="latencyMs" column="latency_ms" />
+            <result property="tokensUsed" column="tokens_used" />
+            <result property="errorType" column="error_type" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,run_id,case_id,question,difficulty,generated_sql,
+        gold_sql,execution_match,is_hallucination,write_op_blocked,latency_ms,
+        tokens_used,error_type
+    </sql>
+</mapper>
