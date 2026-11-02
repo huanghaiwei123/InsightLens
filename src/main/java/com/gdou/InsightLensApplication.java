@@ -5,7 +5,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-@MapperScan("com.gdou.agent")
+@MapperScan("com.gdou.api.mapper")
 public class InsightLensApplication {
 
     public static void main(String[] args) {
