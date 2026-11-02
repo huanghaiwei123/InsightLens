@@ -2,6 +2,11 @@ server:
   port: 8080
 
 spring:
+  # 真实密钥放在项目根目录的 application-local.yaml（不进 jar、不进 git）
+  # 这里不写 optional:，文件缺失就启动失败 —— 快速失败远好过静默 401
+  config:
+    import: file:./application-local.yaml
+
   datasource:
     # 文件模式(持久化,重启数据保留)
     url: jdbc:duckdb:./data/app.duckdb
@@ -13,7 +18,13 @@ spring:
     hikari:
       maximum-pool-size: 1
       minimum-idle: 1
-  ai:
-    chat:
-      turns: 10
 
+  ai:
+    openai:
+      # api-key / base-url 属于环境相关配置，放在 application-local.yaml，不进版本库
+      chat:
+        options:
+          # 与 Codex config.toml 的 model 保持一致：gpt-6-luna（不是 gpt-6.1-luna）
+          model: gpt-6-luna
+          # 问数场景要可复现，温度必须为 0
+          temperature: 0

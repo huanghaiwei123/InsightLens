@@ -36,3 +36,8 @@ build/
 identifier.db
 identifier.db.wal
 data/
+
+### 本地私有配置（内含真实 API Key，绝不入库）
+application-local.yaml
+application-local.yml
+application-local.properties
