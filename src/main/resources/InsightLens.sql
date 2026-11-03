@@ -68,30 +68,63 @@ CREATE INDEX IF NOT EXISTS idx_message_session_created
 
 
 -- =============================================================================
--- 组 B-1：Excel 上传批次（I4.5）
+-- 组 B-1：表注册 + Excel 导入批次（I4.5）
 -- =============================================================================
+-- 【设计要点（2026-11-03 重构）】
+--   废弃「一个 sheet 一张物理表 + 表名带 upload_id」的隔离式设计。
+--   改为「结构相同即复用同一张物理表，批次靠数据行上的 _batch_id 溯源」。
+--   代价：结构相同但语义不同的两份数据（语文成绩 / 数学成绩，列都是
+--        姓名/学号/分数）会被错误合并，且不报错、只答错。
+--   对策：建表前按 schema_key 查注册表，命中则让模型结合 data_tag 与
+--        历史 orig_name 判断复用还是新建。
+--
+--   四个标识各管一件事，互不越界：
+--     schema_key → 结构是否可复用（走索引，SQL 判断，不让模型判断）
+--     data_tag   → 结构相同但语义不同时怎么区分（喂给模型看，不参与匹配）
+--     upload_id  → 哪个文件（UUID，文件列表聚合 + 删除定位）
+--     _batch_id  → 哪批数据行（= upload_batch.id，存在物理表的系统列里）
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS table_registry(
+                                             table_name  VARCHAR PRIMARY KEY,
+                                             schema_key  VARCHAR NOT NULL,
+                                             data_tag    VARCHAR,
+                                             created_at  TIMESTAMP NOT NULL
+);
+COMMENT ON TABLE  table_registry             IS '物理表注册表：每张分析数据表一行，存结构指纹与语义标签，建表前据此判断复用还是新建';
+COMMENT ON COLUMN table_registry.table_name  IS '物理表名，小写字母/数字/下划线；撞名追加 _2/_3，后缀由后端算，不让模型数';
+COMMENT ON COLUMN table_registry.schema_key  IS '结构指纹：用户列名小写 + 类型族，按列名排序后以 | 拼接，如 amount:decimal|order_date:timestamp；不含 _batch_id，不做哈希。查重必须走索引，不要用 information_schema 实时算';
+COMMENT ON COLUMN table_registry.data_tag    IS '语义标签（人可读），如「语文成绩」「数学成绩」。只在新建表时生成一次，复用表时沿用旧值以防标签漂移；为空表示生成失败，已回退为文件名主干';
+COMMENT ON COLUMN table_registry.created_at  IS '建表时间';
+
+CREATE INDEX IF NOT EXISTS idx_registry_schema ON table_registry (schema_key);
+
 
 CREATE SEQUENCE IF NOT EXISTS seq_upload_batch_id START 1;
 
 CREATE TABLE IF NOT EXISTS upload_batch(
-                                           id           INTEGER PRIMARY KEY DEFAULT nextval('seq_upload_batch_id'),
-    upload_id    VARCHAR NOT NULL UNIQUE,
-    orig_name    VARCHAR NOT NULL,
-    table_names  VARCHAR,
-    row_count    BIGINT,
-    file_path    VARCHAR,
-    status       VARCHAR NOT NULL,
-    created_at   TIMESTAMP NOT NULL
+                                           id          INTEGER PRIMARY KEY DEFAULT nextval('seq_upload_batch_id'),
+    upload_id   VARCHAR NOT NULL,
+    table_name  VARCHAR NOT NULL,
+    orig_name   VARCHAR NOT NULL,
+    sheet_name  VARCHAR,
+    row_count   BIGINT,
+    status      VARCHAR NOT NULL,
+    created_at  TIMESTAMP NOT NULL
     );
-COMMENT ON TABLE  upload_batch             IS 'Excel 上传批次表：每次上传一行；Excel 是快照不是流，旧批次不删';
-COMMENT ON COLUMN upload_batch.id          IS '批次记录id（自增主键）';
-COMMENT ON COLUMN upload_batch.upload_id   IS '批次业务标识（UUID），同时用于生成安全表名 u_<upload_id>_xxx 与数据文件名';
-COMMENT ON COLUMN upload_batch.orig_name   IS '原始文件名（含中文/括号，仅用于展示，绝不直接作为表名）';
-COMMENT ON COLUMN upload_batch.table_names IS '本批次生成的物理表名列表，JSON 数组字符串，如 ["u_ab12_sales","u_ab12_refund"]（一个 sheet 一张表）';
-COMMENT ON COLUMN upload_batch.row_count   IS '导入总行数（全部 sheet 求和），用于回答里回显"基于 N 行数据"';
-COMMENT ON COLUMN upload_batch.file_path   IS '对应 DuckDB 数据文件的相对路径，删除批次时据此删文件';
-COMMENT ON COLUMN upload_batch.status      IS '状态：pending / parsing / success / failed / deleted';
-COMMENT ON COLUMN upload_batch.created_at  IS '上传时间；回答时必须回显"基于 X 时间上传的数据"';
+COMMENT ON TABLE  upload_batch            IS '导入批次表：一行 = 一个 sheet 的导入；单 sheet 文件即一行一个文件，多 sheet 文件拆多行共享 upload_id。删文件只删数据行、不删表结构';
+COMMENT ON COLUMN upload_batch.id         IS '导入记录id（自增主键），即物理表 _batch_id 系统列的取值';
+COMMENT ON COLUMN upload_batch.upload_id  IS '文件级标识（UUID）：一个文件一个，多 sheet 时多行共享。前端文件列表按此聚合、删除按此唯一定位；orig_name 仅作删除前的二次校验，不做删除条件（中文/空格/全角字符易导致编码不一致而删不掉）';
+COMMENT ON COLUMN upload_batch.table_name IS '数据写入的物理表名，逻辑关联 table_registry.table_name（应用层保证，不建外键）';
+COMMENT ON COLUMN upload_batch.orig_name  IS '原始文件名 + 批次后缀：<原文件名>_v<序号>_<yyyymmdd>.<ext>，如 语文成绩_v2_20261103.xlsx。后缀既让用户区分同名的多次上传，也让模型识别这是同一类文件的第几次';
+COMMENT ON COLUMN upload_batch.sheet_name IS 'sheet 名；单 sheet 文件可为空';
+COMMENT ON COLUMN upload_batch.row_count  IS '本 sheet 导入行数，回答里回显"基于 N 行数据"；按表汇总用 SUM 实时算，不冗余存储';
+COMMENT ON COLUMN upload_batch.status     IS '状态：pending / success / failed。不做软删除标记，删文件直接删行';
+COMMENT ON COLUMN upload_batch.created_at IS '导入时间，回答时回显"基于 X 时间上传的数据"。注意这是上传时间，不是数据自身的时间范围';
+
+CREATE INDEX IF NOT EXISTS idx_upload_batch_table  ON upload_batch (table_name, created_at);
+CREATE INDEX IF NOT EXISTS idx_upload_batch_upload ON upload_batch (upload_id);
+
 
 
 -- =============================================================================
