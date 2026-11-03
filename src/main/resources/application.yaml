@@ -28,3 +28,13 @@ spring:
           model: gpt-6-luna
           # 问数场景要可复现，温度必须为 0
           temperature: 0
+
+mybatis-plus:
+  configuration:
+    # MyBatis 配置
+    map-underscore-to-camel-case: true
+  global-config:
+    # 全局配置
+    db-config:
+      # 数据库配置
+      id-type: auto
