@@ -19,9 +19,15 @@ public class AnalysisState implements Serializable {
     private String clarifiedQuestion;
 
     /** 口径假设（如「GMV 不含退款」），最终答案必须回显给用户 */
-    private List<String> assumptions;
+    private String[] assumptions;
 
-    /** Schema 检索命中的表名 */
+    /** clarify 的路由信号：true 表示必须打断用户，本轮不再往下走 */
+    private Boolean needClarify;
+
+    /** needClarify=true 时抛给用户的那句话；否则为 null */
+    private String questionToUser;
+
+    /** clarify 选中的表名（selected_tables）；schema_retrieve 为空时兜底为注册表全量 */
     private List<String> candidateTables;
 
     /** 命中表的 DDL + 字段注释，拼进提示词 */
@@ -56,4 +62,5 @@ public class AnalysisState implements Serializable {
 
     /** 图表地址（可选） */
     private String chartUrl;
+
 }

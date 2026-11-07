@@ -98,6 +98,12 @@
             <version>2.0.0.0</version>
         </dependency>
 
+       <!--  用于sql解析      -->
+        <dependency>
+            <groupId>com.github.jsqlparser</groupId>
+            <artifactId>jsqlparser</artifactId>
+            <version>4.9</version>
+        </dependency>
 
     </dependencies>
 
