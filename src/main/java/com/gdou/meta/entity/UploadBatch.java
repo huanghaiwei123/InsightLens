@@ -1,7 +1,6 @@
 package com.gdou.meta.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -9,162 +8,55 @@ import lombok.Data;
 import java.util.Date;
 
 /**
- * Excel 上传批次表：每次上传一行；Excel 是快照不是流，旧批次不删
+ * 导入批次表：一行 = 一个 sheet 的导入；单 sheet 文件即一行一个文件，
+ * 多 sheet 文件拆多行共享 upload_id。删文件只删数据行、不删表结构
  * @TableName upload_batch
  */
 @Data
-@TableName(value ="upload_batch")
+@TableName(value = "upload_batch")
 public class UploadBatch {
+
     /**
-     * 批次记录id（自增主键）
+     * 导入记录id（自增主键，取值来自 seq_upload_batch_id），
+     * 即物理表 _batch_id 系统列的取值
      */
-    @TableId
+    @TableId(value = "id", type = IdType.AUTO)
     private Integer id;
 
     /**
-     * 批次业务标识（UUID），同时用于生成安全表名 u_<upload_id>_xxx 与数据文件名
+     * 文件级标识（UUID）：一个文件一个，多 sheet 时多行共享。
+     * 前端文件列表按此聚合、删除按此唯一定位
      */
     private String uploadId;
 
     /**
-     * 原始文件名（含中文/括号，仅用于展示，绝不直接作为表名）
+     * 数据写入的物理表名，逻辑关联 table_registry.table_name（应用层保证，不建外键）
+     */
+    private String tableName;
+
+    /**
+     * 原始文件名 + 批次后缀：<原文件名>_v<序号>_<yyyymmdd>.<ext>，如 语文成绩_v2_20261103.xlsx；
+     * 后缀既让用户区分同名的多次上传，也让模型识别这是同一类文件的第几次
      */
     private String origName;
 
     /**
-     * 本批次生成的物理表名列表，JSON 数组字符串，如 ["u_ab12_sales","u_ab12_refund"]（一个 sheet 一张表）
+     * sheet 名；单 sheet 文件可为空
      */
-    private String tableNames;
+    private String sheetName;
 
     /**
-     * 导入总行数（全部 sheet 求和），用于回答里回显"基于 N 行数据"
+     * 本 sheet 导入行数，回答里回显"基于 N 行数据"；按表汇总用 SUM 实时算，不冗余存储
      */
     private Long rowCount;
 
     /**
-     * 对应 DuckDB 数据文件的相对路径，删除批次时据此删文件
-     */
-    private String filePath;
-
-    /**
-     * 状态：pending / parsing / success / failed / deleted
+     * 状态：pending / success / failed。不做软删除标记，删文件直接删行
      */
     private String status;
 
     /**
-     * 上传时间；回答时必须回显"基于 X 时间上传的数据"
+     * 导入时间，回答时回显"基于 X 时间上传的数据"。注意这是上传时间，不是数据自身的时间范围
      */
     private Date createdAt;
-
-    /**
-     * 批次记录id（自增主键）
-     */
-    public Integer getId() {
-        return id;
-    }
-
-    /**
-     * 批次记录id（自增主键）
-     */
-    public void setId(Integer id) {
-        this.id = id;
-    }
-
-    /**
-     * 批次业务标识（UUID），同时用于生成安全表名 u_<upload_id>_xxx 与数据文件名
-     */
-    public String getUploadId() {
-        return uploadId;
-    }
-
-    /**
-     * 批次业务标识（UUID），同时用于生成安全表名 u_<upload_id>_xxx 与数据文件名
-     */
-    public void setUploadId(String uploadId) {
-        this.uploadId = uploadId;
-    }
-
-    /**
-     * 原始文件名（含中文/括号，仅用于展示，绝不直接作为表名）
-     */
-    public String getOrigName() {
-        return origName;
-    }
-
-    /**
-     * 原始文件名（含中文/括号，仅用于展示，绝不直接作为表名）
-     */
-    public void setOrigName(String origName) {
-        this.origName = origName;
-    }
-
-    /**
-     * 本批次生成的物理表名列表，JSON 数组字符串，如 ["u_ab12_sales","u_ab12_refund"]（一个 sheet 一张表）
-     */
-    public String getTableNames() {
-        return tableNames;
-    }
-
-    /**
-     * 本批次生成的物理表名列表，JSON 数组字符串，如 ["u_ab12_sales","u_ab12_refund"]（一个 sheet 一张表）
-     */
-    public void setTableNames(String tableNames) {
-        this.tableNames = tableNames;
-    }
-
-    /**
-     * 导入总行数（全部 sheet 求和），用于回答里回显"基于 N 行数据"
-     */
-    public Long getRowCount() {
-        return rowCount;
-    }
-
-    /**
-     * 导入总行数（全部 sheet 求和），用于回答里回显"基于 N 行数据"
-     */
-    public void setRowCount(Long rowCount) {
-        this.rowCount = rowCount;
-    }
-
-    /**
-     * 对应 DuckDB 数据文件的相对路径，删除批次时据此删文件
-     */
-    public String getFilePath() {
-        return filePath;
-    }
-
-    /**
-     * 对应 DuckDB 数据文件的相对路径，删除批次时据此删文件
-     */
-    public void setFilePath(String filePath) {
-        this.filePath = filePath;
-    }
-
-    /**
-     * 状态：pending / parsing / success / failed / deleted
-     */
-    public String getStatus() {
-        return status;
-    }
-
-    /**
-     * 状态：pending / parsing / success / failed / deleted
-     */
-    public void setStatus(String status) {
-        this.status = status;
-    }
-
-    /**
-     * 上传时间；回答时必须回显"基于 X 时间上传的数据"
-     */
-    public Date getCreatedAt() {
-        return createdAt;
-    }
-
-    /**
-     * 上传时间；回答时必须回显"基于 X 时间上传的数据"
-     */
-    public void setCreatedAt(Date createdAt) {
-        this.createdAt = createdAt;
-    }
 }

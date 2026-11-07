@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="generator.mapper.TableRegistryMapper">
+
+    <resultMap id="BaseResultMap" type="generator.entity.TableRegistry">
+            <id property="tableName" column="table_name" />
+            <result property="schemaKey" column="schema_key" />
+            <result property="dataTag" column="data_tag" />
+            <result property="createdAt" column="created_at" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        table_name,schema_key,data_tag,created_at
+    </sql>
+</mapper>
