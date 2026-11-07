@@ -35,6 +35,7 @@ build/
 ### 运行产物
 identifier.db
 identifier.db.wal
+identifier.db.wal.bak
 data/
 
 ### 本地私有配置（内含真实 API Key，绝不入库）
