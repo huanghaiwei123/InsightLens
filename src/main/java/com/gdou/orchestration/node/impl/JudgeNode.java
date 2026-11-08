@@ -38,12 +38,19 @@ public class JudgeNode implements Node {
             String raw = llmClient.call(messages);
             try {
                 JudgeEntity entity = objectMapper.readValue(extractJson(raw), JudgeEntity.class);
-                state.setVerdict(entity.verdict());
-                if("off_target".equals(entity.verdict().trim())){
+                String verdict = entity.verdict().trim();
+                state.setVerdict(verdict);
+                if ("off_target".equals(verdict)) {
+                    // reason 是给 sql_generate 的可操作修正指令，不回复用户
                     state.setError(entity.reason());
-                }else{
-                    state.setAnswer(entity.answer());
+                    state.setAnswer(null);
+                } else if ("empty".equals(verdict)) {
+                    // reason 是面向用户的场景化说明，直接作为最终回答
                     state.setError(null);
+                    state.setAnswer(entity.reason());
+                } else {
+                    state.setError(null);
+                    state.setAnswer(entity.answer());
                 }
             } catch (Exception e) {
                 throw new RuntimeException("JudgeNode：JSON 解析失败，原文：" + raw, e);
@@ -91,11 +98,11 @@ public class JudgeNode implements Node {
 
 record JudgeEntity(
 
-        /** 判定结论：ok / off_target */
+        /** 判定结论：ok / off_target / empty */
         @JsonProperty("verdict")
         String verdict,
 
-        /** 判断sql生成的查询结果是否合适比过年能解决用户需求 */
+        /** 双语义：off_target 时是 SQL 修正指令，empty 时是面向用户的场景化说明 */
         @JsonProperty("reason")
         String reason,
 
