@@ -2,11 +2,18 @@ package com.gdou.api.exception;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-/**
- * 目前只有jdk自带的异常，并没有定义项目相关的业务异常
- */
 @RestControllerAdvice
 public class ExceptionHandle {
+
+    /**
+     * 业务相关异常，与jdk自带异常进行区分
+     * @param e
+     */
+    @ExceptionHandler(BusinessException.class)
+    public void handleBusinessException(BusinessException e){
+        throw e;
+    }
+
 
     /**
      * 兜底处理
