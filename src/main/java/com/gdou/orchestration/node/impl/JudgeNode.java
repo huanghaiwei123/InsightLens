@@ -7,54 +7,71 @@ import com.gdou.orchestration.AnalysisState;
 import com.gdou.orchestration.RunContext;
 import com.gdou.orchestration.node.Node;
 import com.gdou.orchestration.node.NodeName;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 
+@Slf4j
 @Service(NodeName.JUDGE)
 public class JudgeNode implements Node {
     private final LlmClient llmClient;
     private final ObjectMapper objectMapper;
+
     public JudgeNode(LlmClient llmClient, ObjectMapper objectMapper) {
         this.llmClient = llmClient;
         this.objectMapper = objectMapper;
     }
+
     @Override
     public void apply(AnalysisState state, RunContext ctx) {
+        long start = System.currentTimeMillis();
+        log.info("[judge] >>> rowCount={}, 已有 verdict={}, sql={}",
+                state.getRowCount(), state.getVerdict(), state.getSql());
+        if (state.getVerdict() != null) {
+            log.info("[judge] 已有判定 {}，跳过模型调用", state.getVerdict());
+            return;
+        }
+
         String systemMsg = buildSystemMsg("message/JudgeNode.txt");
         String userMsg = buildUserMag(state);
         List<Message> messages = List.of(
                 new SystemMessage(systemMsg),
                 new UserMessage(userMsg)
         );
-        if(state.getVerdict() == null){
-            String raw = llmClient.call(messages);
-            try {
-                JudgeEntity entity = objectMapper.readValue(extractJson(raw), JudgeEntity.class);
-                String verdict = entity.verdict().trim();
-                state.setVerdict(verdict);
-                if ("off_target".equals(verdict)) {
-                    // reason 是给 sql_generate 的可操作修正指令，不回复用户
-                    state.setError(entity.reason());
-                    state.setAnswer(null);
-                } else if ("empty".equals(verdict)) {
-                    // reason 是面向用户的场景化说明，直接作为最终回答
-                    state.setError(null);
-                    state.setAnswer(entity.reason());
-                } else {
-                    state.setError(null);
-                    state.setAnswer(entity.answer());
-                }
-            } catch (Exception e) {
-                throw new RuntimeException("JudgeNode：JSON 解析失败，原文：" + raw, e);
+        String raw = llmClient.call(messages);
+        log.debug("[judge] 模型返回原文：{}", raw);
+        try {
+            JudgeEntity entity = objectMapper.readValue(extractJson(raw), JudgeEntity.class);
+            String verdict = entity.verdict().trim();
+            state.setVerdict(verdict);
+            if ("off_target".equals(verdict)) {
+                // reason 是给 sql_generate 的可操作修正指令，不回复用户
+                state.setError(entity.reason());
+                state.setAnswer(null);
+                log.warn("[judge] <<< off_target，进入修正循环：reason={}", entity.reason());
+            } else if ("empty".equals(verdict)) {
+                // reason 是面向用户的场景化说明，直接作为最终回答
+                state.setError(null);
+                state.setAnswer(entity.reason());
+                log.info("[judge] <<< empty，如实回答：answer={}", entity.reason());
+            } else {
+                state.setError(null);
+                state.setAnswer(entity.answer());
+                log.info("[judge] <<< ok，cost={}ms, answer={}",
+                        System.currentTimeMillis() - start, entity.answer());
             }
+        } catch (Exception e) {
+            log.error("[judge] JSON 解析失败，raw={}", raw, e);
+            throw new RuntimeException("JudgeNode：JSON 解析失败，原文：" + raw, e);
         }
     }
 
@@ -79,7 +96,7 @@ public class JudgeNode implements Node {
         List<Object> rows = state.getResultRows();
         StringBuilder builder = new StringBuilder();
         builder.append("用户澄清后的问题：").append(state.getClarifiedQuestion()).append("\n");
-        builder.append("口径假设：").append(state.getAssumptions()==null?"[]":Arrays.toString(state.getAssumptions())).append("\n");
+        builder.append("口径假设：").append(state.getAssumptions() == null ? "[]" : Arrays.toString(state.getAssumptions())).append("\n");
         builder.append("生成的sql：").append(state.getSql()).append("\n");
         builder.append("执行结果：").append(rows.toString()).append("rowCount=").append(state.getRowCount()).append("\n");
         return builder.toString();
@@ -87,10 +104,10 @@ public class JudgeNode implements Node {
 
     @SuppressWarnings({"all"})
     private String buildSystemMsg(String path) {
-        try {
-            InputStream in = new ClassPathResource(path).getInputStream();
+        try (InputStream in = new ClassPathResource(path).getInputStream()) {
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
+            log.error("[judge] 提示词读取失败 path={}", path, e);
             throw new RuntimeException(e);
         }
     }

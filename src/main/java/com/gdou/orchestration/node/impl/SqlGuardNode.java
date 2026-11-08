@@ -8,6 +8,7 @@ import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.statement.Statement;
 import net.sf.jsqlparser.statement.select.Select;
 import net.sf.jsqlparser.util.TablesNamesFinder;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.HashSet;
@@ -34,6 +35,7 @@ import java.util.regex.Pattern;
  * 后者是给 sql_generate 的可操作输入（SqlGenerateNode 据此把上一轮 SQL 连同原因回填给模型）。
  * 通过时必须清空上一轮残留的 error，否则 nextSqlJudge 会把成功路径误判为失败再回 ③。
  */
+@Slf4j
 @Service(NodeName.SQL_GUARD)
 public class SqlGuardNode implements Node {
 
@@ -66,7 +68,9 @@ public class SqlGuardNode implements Node {
 
     @Override
     public void apply(AnalysisState state, RunContext ctx) {
+        long start = System.currentTimeMillis();
         String sql = state.getSql();
+        log.info("[sql-guard] >>> 待校验 sql={}", sql);
         if (sql == null || sql.isBlank()) {
             reject(state, "SQL 为空");
             return;
@@ -111,6 +115,7 @@ public class SqlGuardNode implements Node {
                 whitelist.add(t.toLowerCase());
             }
         }
+        log.debug("[sql-guard] 本轮表名白名单={}", whitelist);
         for (String table : extractTables(stripped)) {
             if (!whitelist.contains(table.toLowerCase())) {
                 reject(state, "查询了白名单之外的表：" + table);
@@ -141,6 +146,8 @@ public class SqlGuardNode implements Node {
         // 上一轮 reject 写进 error 的原因已消费完，必须清掉：
         // nextSqlJudge 以 error == null 作为成功条件，残留会导致再次回 ③
         state.setError(null);
+        log.info("[sql-guard] <<< pass cost={}ms, 自动补 LIMIT={}, finalSql={}",
+                System.currentTimeMillis() - start, !hasLimit, state.getSql());
     }
 
     /**
@@ -243,8 +250,13 @@ public class SqlGuardNode implements Node {
         return p.matcher(text).find();
     }
 
+    /**
+     * 所有规则的统一拒绝出口：在这里记一条 WARN，七条规则不必各自埋点，
+     * 排障时按 [sql-guard] reject 一捞就能看到被拦的原因与原始 SQL。
+     */
     private void reject(AnalysisState state, String reason) {
         state.setValidationResult("reject");
         state.setError(reason);
+        log.warn("[sql-guard] reject reason={}, sql={}", reason, state.getSql());
     }
 }

@@ -11,7 +11,7 @@ import com.gdou.orchestration.AnalysisState;
 import com.gdou.orchestration.RunContext;
 import com.gdou.orchestration.node.Node;
 import com.gdou.orchestration.node.NodeName;
-import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
@@ -19,13 +19,16 @@ import org.springframework.beans.BeanUtils;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
-import java.io.*;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 
 /**
  * 意图澄清状态节点执行
  */
+@Slf4j
 @Service(NodeName.CLARIFY)
 public class ClarifyNode implements Node {
     private final LlmClient LlmClient;
@@ -40,19 +43,29 @@ public class ClarifyNode implements Node {
 
     @Override
     public void apply(AnalysisState state, RunContext ctx) {
+        long start = System.currentTimeMillis();
         String question = state.getQuestion();
         String systemMessage = prompt("message/ClarifyNode.txt");
-        String userMessage = question + "\n\n候选表清单（表名 | 语义标签 | 列:类型）：\n" + tableList();
+        String tables = tableList();
+        // 标题与 ClarifyNode.txt 的「1. 输入」逐字对齐，第三列是结构指纹不是列定义
+        String userMessage = question + "\n\n候选表清单（表名 | 语义标签 | 结构指纹）：\n" + tables;
         List<Message> messages = List.of(
                 new SystemMessage(systemMessage),
                 new UserMessage(userMessage));
+        log.info("[clarify] >>> question={}, 候选表行数={}", question, tables.lines().count());
+
         String raw = LlmClient.call(messages);
+        log.debug("[clarify] 模型返回原文：{}", raw);
         ClarifyEntity node = parseJson(raw);
         BeanUtils.copyProperties(node, state);
         // selectedTables 与 state 字段名不同，copyProperties 映射不到，显式赋值：
         // candidateTables 从此语义为「clarify 选中的表」，schema_retrieve 空时才兜底全量
         state.setCandidateTables(
                 node.selectedTables() == null ? List.of() : List.of(node.selectedTables()));
+
+        log.info("[clarify] <<< cost={}ms, needClarify={}, clarifiedQuestion={}, assumptions={}, selectedTables={}, questionToUser={}",
+                System.currentTimeMillis() - start, state.getNeedClarify(), state.getClarifiedQuestion(),
+                Arrays.toString(state.getAssumptions()), state.getCandidateTables(), state.getQuestionToUser());
     }
 
     /**
@@ -65,6 +78,7 @@ public class ClarifyNode implements Node {
         wrapper.select(TableRegistry::getTableName, TableRegistry::getDataTag, TableRegistry::getSchemaKey);
         List<TableRegistry> tables = tableRegistryMapper.selectList(wrapper);
         if (tables.isEmpty()) {
+            log.warn("[clarify] table_registry 为空，候选表清单无表可选");
             return "（库中暂无任何数据表）";
         }
         StringBuilder sb = new StringBuilder();
@@ -82,13 +96,13 @@ public class ClarifyNode implements Node {
         try {
             return objectMapper.readValue(json, ClarifyEntity.class);
         } catch (JsonProcessingException e) {
+            log.error("[clarify] JSON 解析失败，raw={}", raw, e);
             throw new RuntimeException(e);
         }
     }
 
-
     /**
-     * 防止模型返回json时附带其余话术干扰json解析
+     * 防止模型返回 json 时附带其余话术干扰 json 解析
      * @param raw
      * @return
      */
@@ -102,9 +116,10 @@ public class ClarifyNode implements Node {
      * @return
      */
     private String prompt(String path) {
-        try(InputStream in = new ClassPathResource(path).getInputStream()){
+        try (InputStream in = new ClassPathResource(path).getInputStream()) {
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         } catch (IOException e) {
+            log.error("[clarify] 提示词读取失败 path={}", path, e);
             throw new RuntimeException(e);
         }
     }
@@ -134,4 +149,3 @@ record ClarifyEntity (
     String[] selectedTables
 
 ){}
-

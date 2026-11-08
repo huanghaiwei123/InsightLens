@@ -7,10 +7,12 @@ import com.gdou.orchestration.AnalysisState;
 import com.gdou.orchestration.RunContext;
 import com.gdou.orchestration.node.Node;
 import com.gdou.orchestration.node.NodeName;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -25,6 +27,7 @@ import java.util.stream.Collectors;
  * 连接统一走 Spring 数据源（JdbcTemplate → jdbc:duckdb:./data/app.duckdb），
  * 不要再 DriverManager 直连：绕过连接池，且与 Hikari(size=1) 的单写者约定冲突。
  */
+@Slf4j
 @Service(NodeName.SCHEMA_RETRIEVE)
 public class SchemaRetrieveNode implements Node {
 
@@ -43,12 +46,16 @@ public class SchemaRetrieveNode implements Node {
 
     @Override
     public void apply(AnalysisState state, RunContext ctx) {
+        long start = System.currentTimeMillis();
+        log.info("[schema] >>> 入参 candidateTables={}", state.getCandidateTables());
+
         // clarify 选中的表；为空（模型没选 / 库里还没表）时兜底为注册表全量
         if (state.getCandidateTables() == null || state.getCandidateTables().isEmpty()) {
             LambdaQueryWrapper<TableRegistry> wrapper = new LambdaQueryWrapper<>();
             wrapper.select(TableRegistry::getTableName);
             state.setCandidateTables(tableRegistryMapper.selectList(wrapper)
                     .stream().map(TableRegistry::getTableName).toList());
+            log.info("[schema] clarify 未选表，兜底为注册表全量：{}", state.getCandidateTables());
         }
 
         // DDL 取「选中的用户表 + 全部系统表」：系统表不进 clarify 清单但模型可能关联它们，
@@ -66,15 +73,20 @@ public class SchemaRetrieveNode implements Node {
             }
         }
 
-        String placeholders = String.join(",", java.util.Collections.nCopies(wantTables.size(), "?"));
+        String placeholders = String.join(",", Collections.nCopies(wantTables.size(), "?"));
         String sql = "select table_name, sql from duckdb_tables()"
                 + " where schema_name = 'main' and lower(table_name) in (" + placeholders + ")";
+        log.debug("[schema] 查询 DDL：{} | 参数={}", sql, wantTables);
 
-        List<String> ddlList = jdbc.query(sql, (rs, rowNum) -> rs.getString("sql"),
-                wantTables.toArray());
+        List<String> ddlList = jdbc.query(sql, (rs, rowNum) -> rs.getString("sql"), wantTables.toArray());
         String schemas = ddlList.stream()
                 .filter(Objects::nonNull)
                 .collect(Collectors.joining("\n"));
         state.setTableSchemas(schemas.isEmpty() ? null : schemas);
+        if (schemas.isEmpty()) {
+            log.warn("[schema] 未取到任何 DDL，后续 SQL 生成将缺少表结构；wantTables={}", wantTables);
+        }
+        log.info("[schema] <<< cost={}ms, 请求表数={}, 命中 DDL 条数={}, DDL 字符数={}",
+                System.currentTimeMillis() - start, wantTables.size(), ddlList.size(), schemas.length());
     }
 }
