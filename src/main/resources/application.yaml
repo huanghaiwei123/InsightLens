@@ -26,7 +26,6 @@ spring:
         options:
           # 与 Codex config.toml 的 model 保持一致：gpt-6-luna（不是 gpt-6.1-luna）
           model: gpt-6-luna
-          # 问数场景要可复现，温度必须为 0
           temperature: 0
 
 mybatis-plus:

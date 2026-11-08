@@ -126,7 +126,6 @@ CREATE INDEX IF NOT EXISTS idx_upload_batch_table  ON upload_batch (table_name, 
 CREATE INDEX IF NOT EXISTS idx_upload_batch_upload ON upload_batch (upload_id);
 
 
-
 -- =============================================================================
 -- 组 B-2：评测（I7）—— 1 run → N case，一对多
 -- =============================================================================
