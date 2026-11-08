@@ -37,3 +37,13 @@ mybatis-plus:
     db-config:
       # 数据库配置
       id-type: auto
+
+# 链路追踪：请求开始时 GraphRunner 把 traceId 放进 MDC，
+# 同一轮问答里所有节点日志会自动带上同一个 ID，grep 该 ID 即可还原完整链路。
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%X{traceId:-no-trace}] %logger{36} - %msg%n"
+  level:
+    root: INFO
+    com.gdou: INFO
+    # 排障时把 com.gdou 调成 DEBUG，可额外看到模型返回原文、DDL 查询语句与白名单明细
