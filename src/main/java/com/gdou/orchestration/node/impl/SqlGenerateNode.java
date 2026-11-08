@@ -3,6 +3,7 @@ package com.gdou.orchestration.node.impl;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gdou.api.exception.BusinessException;
 import com.gdou.infra.LlmClient;
 import com.gdou.orchestration.AnalysisState;
 import com.gdou.orchestration.RunContext;
@@ -38,6 +39,9 @@ public class SqlGenerateNode implements Node {
 
     @Override
     public void apply(AnalysisState state, RunContext ctx) {
+        if(state.getRetryCount()==3){
+            throw new BusinessException("sql生成重试次数达到上限两次，关闭这轮问答");
+        }
         String systemMessage = prompt("message/SqlGenerateNode.txt");
         String userMessage = buildUserMessage(state);
         String raw = llmClient.call(List.of(
@@ -73,17 +77,17 @@ public class SqlGenerateNode implements Node {
         int start = raw.indexOf('{');
         int end = raw.lastIndexOf('}');
         if (start < 0 || end <= start) {
-            throw new RuntimeException("SQL 生成节点：模型返回中未找到 JSON，原文：" + raw);
+            throw new BusinessException("SQL 生成节点：模型返回中未找到 JSON，原文：" + raw);
         }
         String json = raw.substring(start, end + 1);
         try {
             SqlGenerateEntity entity = objectMapper.readValue(json, SqlGenerateEntity.class);
             if (entity.sql() == null || entity.sql().isBlank()) {
-                throw new RuntimeException("SQL 生成节点：模型返回的 sql 字段为空，原文：" + raw);
+                throw new BusinessException("SQL 生成节点：模型返回的 sql 字段为空，原文：" + raw);
             }
             return entity;
         } catch (JsonProcessingException e) {
-            throw new RuntimeException("SQL 生成节点：模型返回无法解析为 JSON，原文：" + raw, e);
+            throw new BusinessException("SQL 生成节点：模型返回无法解析为 JSON，原文：" + raw);
         }
     }
 
