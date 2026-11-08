@@ -8,10 +8,9 @@ import org.springframework.stereotype.Service;
 
 @Service(NodeName.SUMMARIZE)
 public class SummarizeNode implements Node {
-
     @Override
     public void apply(AnalysisState state, RunContext ctx) {
-        // TODO 待实现：先说结论，再回显口径假设，写入 answer；期间通过 ctx.sink() 推 token
-        String answer = state.getAnswer();
+        String answer = state.getAnswer() == null ? "大模型调用出错了，请稍后重试" : state.getAnswer();
+        state.setAnswer(answer);
     }
 }

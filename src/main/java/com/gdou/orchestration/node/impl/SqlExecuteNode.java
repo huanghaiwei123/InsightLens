@@ -40,10 +40,6 @@ public class SqlExecuteNode implements Node {
             });
             state.setResultRows(res);
             state.setRowCount(res.size());
-            if(res.isEmpty()){
-                state.setError("empty result");
-                state.setVerdict("empty");
-            }
         } catch (Exception e) {
             state.setError(e.getMessage());
             state.setVerdict("error");

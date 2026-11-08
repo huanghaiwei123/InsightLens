@@ -13,12 +13,14 @@ import java.util.Map;
 
 @Component
 public class GraphRunner {
-    private String nodeName = NodeName.CLARIFY;
+    private String nodeName;
     private final Map<String, Node> node;
     public GraphRunner(Map<String, Node> node) {
         this.node = node;
     }
     public Object run(String question){
+        /** 初始置nodeName为CLARIFY，原因是使用了自动注入，但是默认是单例，所以每轮对话都相当于拿到同一个GraphRunner对象，里面的数据也是可以被不同线程共享的 **/
+        nodeName = NodeName.CLARIFY;
         AnalysisState state = new AnalysisState();
         state.setQuestion(question);
         while(!nodeName.equals(NodeName.DONE)){
@@ -52,19 +54,19 @@ public class GraphRunner {
                 }
                 case NodeName.SUMMARIZE -> {
                     node.get(NodeName.SUMMARIZE).apply(state,null);
+                    nextSummarize();
                 }
             }
         }
-        return null;
+        return state;
     }
 
     private void nextClarify(AnalysisState state) {
-        if(state.getNeedClarify().equals(Boolean.TRUE)){
+        if (state.getNeedClarify().equals(Boolean.TRUE)) {
             nodeName = NodeName.DONE;
-        }else{
-            state.setClarifiedQuestion(state.getQuestion());
+        } else {
+            nodeName = NodeName.SCHEMA_RETRIEVE;
         }
-        nodeName = NodeName.SCHEMA_RETRIEVE;
     }
 
     private void nextSchemaRetrieve() {
@@ -76,7 +78,10 @@ public class GraphRunner {
     }
 
     private void nextSqlGuard(AnalysisState state){
-        nodeName = state.getValidationResult().equals("pass")?NodeName.SQL_GENERATE:NodeName.SQL_EXECUTE;
+        nodeName = state.getValidationResult().equals("pass")?NodeName.SQL_EXECUTE:NodeName.SQL_GENERATE;
+        if(nodeName.equals(NodeName.SQL_GENERATE)){
+            state.setRetryCount(state.getRetryCount()+1);
+        }
     }
 
     private void nextSqlExecute(AnalysisState state) {
@@ -84,7 +89,16 @@ public class GraphRunner {
     }
 
     private void nextSqlJudge(AnalysisState state) {
-        nodeName = state.getError() == null?NodeName.SQL_GENERATE:NodeName.SUMMARIZE;
+        nodeName = state.getError() == null?NodeName.SUMMARIZE:NodeName.SQL_GENERATE;
+        state.setVerdict(null); //重置字段为null防止JudgeNode节点第二轮被持续污染
+        if(nodeName.equals(NodeName.SQL_GENERATE)){
+            state.setRetryCount(state.getRetryCount()+1);
+        }
     }
+
+    private void nextSummarize() {
+        nodeName = NodeName.DONE;
+    }
+
 
 }

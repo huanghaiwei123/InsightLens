@@ -39,7 +39,7 @@ public class AnalysisState implements Serializable {
     /** 一句话说明这条 SQL 想回答什么 */
     private String sqlExplain;
 
-    /** 安全校验结论：pass / reject + 原因 */
+    /** 安全校验结论：仅 pass / reject 两个值；拒绝原因见 error */
     private String validationResult;
 
     /** 执行结果集（最多 200 行） */
@@ -52,7 +52,7 @@ public class AnalysisState implements Serializable {
     private String error;
 
     /** SQL 修正次数，硬上限 2 */
-    private Integer retryCount;
+    private Integer retryCount=0;
 
     /** 判定结论：ok / empty / error / off_target */
     private String verdict;
