@@ -29,8 +29,10 @@ import java.util.regex.Pattern;
  *                              四者同时成立才拒绝；其余时间口径问题（如聚合无边界）
  *                              属生成质量问题，交 judge 判 off_target 走修正循环。
  *
- * 不通过：validationResult = "reject:<原因>"，直接终止，不进入修正循环——
- * 这是安全问题不是生成质量问题，让模型重写等于教它绕过校验。
+ * 不通过：validationResult = "reject"，具体原因写入 state.error。
+ * 校验结论与错误原因分离：前者是 GraphRunner 的路由信号（pass → ⑤ / reject → ③），
+ * 后者是给 sql_generate 的可操作输入（SqlGenerateNode 据此把上一轮 SQL 连同原因回填给模型）。
+ * 通过时必须清空上一轮残留的 error，否则 nextSqlJudge 会把成功路径误判为失败再回 ③。
  */
 @Service(NodeName.SQL_GUARD)
 public class SqlGuardNode implements Node {
@@ -136,6 +138,9 @@ public class SqlGuardNode implements Node {
         }
 
         state.setValidationResult("pass");
+        // 上一轮 reject 写进 error 的原因已消费完，必须清掉：
+        // nextSqlJudge 以 error == null 作为成功条件，残留会导致再次回 ③
+        state.setError(null);
     }
 
     /**
@@ -239,6 +244,7 @@ public class SqlGuardNode implements Node {
     }
 
     private void reject(AnalysisState state, String reason) {
-        state.setValidationResult("reject:" + reason);
+        state.setValidationResult("reject");
+        state.setError(reason);
     }
 }
