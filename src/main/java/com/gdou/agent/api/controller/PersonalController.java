@@ -23,8 +23,7 @@ public class PersonalController {
     @PostMapping("/chat")
     public Result chat(@RequestParam("userMsg") String userMsg) {
         // 在 HTTP 边界生成 traceId，GraphRunner 复用它，整轮问答的节点日志共用一个 ID
-        String traceId = UUID.randomUUID().toString().substring(0, 8);
-        MDC.put(GraphRunner.TRACE_ID, traceId);
+        String traceId = MDC.get(GraphRunner.TRACE_ID);
         long start = System.currentTimeMillis();
         log.info("[chat] >>> 收到请求 traceId={}, userMsg={}", traceId, userMsg);
         try {
@@ -35,8 +34,6 @@ public class PersonalController {
             log.error("[chat] 请求失败 traceId={}, cost={}ms, userMsg={}",
                     traceId, System.currentTimeMillis() - start, userMsg, e);
             throw e;
-        } finally {
-            MDC.remove(GraphRunner.TRACE_ID);
         }
     }
 
