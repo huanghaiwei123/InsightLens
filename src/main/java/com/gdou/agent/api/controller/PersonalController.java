@@ -3,6 +3,7 @@ package com.gdou.agent.api.controller;
 import com.gdou.agent.api.common.Result;
 import com.gdou.agent.api.constant.CodeConstant;
 import com.gdou.agent.api.constant.MsgConstant;
+import com.gdou.agent.orchestration.GraphReturner;
 import com.gdou.agent.orchestration.GraphRunner;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
@@ -11,7 +12,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-
 import java.util.UUID;
 
 @Slf4j
@@ -28,9 +28,9 @@ public class PersonalController {
         long start = System.currentTimeMillis();
         log.info("[chat] >>> 收到请求 traceId={}, userMsg={}", traceId, userMsg);
         try {
-            Object data = runner.run(userMsg);
+            GraphReturner returner = runner.run(userMsg);
             log.info("[chat] <<< 完成 traceId={}, cost={}ms", traceId, System.currentTimeMillis() - start);
-            return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS, data);
+            return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS, returner);
         } catch (Exception e) {
             log.error("[chat] 请求失败 traceId={}, cost={}ms, userMsg={}",
                     traceId, System.currentTimeMillis() - start, userMsg, e);

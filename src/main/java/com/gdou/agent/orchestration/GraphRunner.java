@@ -34,7 +34,7 @@ public class GraphRunner {
         this.node = node;
     }
 
-    public Object run(String question) {
+    public GraphReturner run(String question) {
         long start = System.currentTimeMillis();
         boolean ownsTrace = false;
         String traceId = MDC.get(TRACE_ID);
@@ -52,6 +52,7 @@ public class GraphRunner {
 
         try {
             int step = 0;
+            GraphReturner graphReturner = null;
             while (!nodeName.equals(NodeName.DONE)) {
                 String current = nodeName;
                 long nodeStart = System.currentTimeMillis();
@@ -64,7 +65,7 @@ public class GraphRunner {
                         if (nodeName.equals(NodeName.DONE)) {
                             log.info("[graph] <<< 结束(澄清中断) traceId={}, cost={}ms, questionToUser={}",
                                     traceId, System.currentTimeMillis() - start, state.getQuestionToUser());
-                            return state.getQuestionToUser();
+                            graphReturner = GraphReturner.builder().questionToUser(state.getQuestionToUser()).build();
                         }
                     }
                     case NodeName.SCHEMA_RETRIEVE -> {
@@ -90,6 +91,7 @@ public class GraphRunner {
                     case NodeName.SUMMARIZE -> {
                         node.get(NodeName.SUMMARIZE).apply(state, ctx);
                         nodeName = nextSummarize(current);
+                        graphReturner = GraphReturner.builder().answer(state.getAnswer()).build();
                     }
                     default -> {
                         // 原实现遇到未知节点名会一直空转，这里收敛为结束并留一条 ERROR
@@ -103,7 +105,7 @@ public class GraphRunner {
             log.info("[graph] <<< 结束 traceId={}, cost={}ms, step={}, retryCount={}, answerLen={}",
                     traceId, System.currentTimeMillis() - start, step, state.getRetryCount(),
                     state.getAnswer() == null ? 0 : state.getAnswer().length());
-            return state;
+            return graphReturner;
         } catch (Exception e) {
             log.error("[graph] 执行异常 traceId={}, 中断节点={}, cost={}ms, question={}",
                     traceId, nodeName, System.currentTimeMillis() - start, question, e);
