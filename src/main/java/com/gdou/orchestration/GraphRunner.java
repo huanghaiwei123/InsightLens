@@ -18,7 +18,9 @@ import java.util.UUID;
  * 并构造 RunContext 传给每个节点。HTTP 入口若已生成 traceId 则复用，
  * 直接调用 run() 时自行生成；谁生成谁在 finally 里清理，避免污染线程池的下一个请求。
  *
- * 注意：nodeName 是单例字段，每轮 run() 开头必须重置为 CLARIFY。
+ * 并发安全：本类由 Spring 单例管理，但当前节点名是 run() 的局部变量；
+ * next 方法统一「接收当前节点名、返回下一节点名」，不读写任何共享可变状态，
+ * 因此多个请求可以同时进入 run() 而互不干扰，也无需在入口重置字段。
  */
 @Slf4j
 @Component
@@ -26,7 +28,6 @@ public class GraphRunner {
 
     public static final String TRACE_ID = "traceId";
 
-    private String nodeName;
     private final Map<String, Node> node;
 
     public GraphRunner(Map<String, Node> node) {
@@ -44,7 +45,7 @@ public class GraphRunner {
         }
         RunContext ctx = new RunContext(traceId, new NoOpStreamSink());
 
-        nodeName = NodeName.CLARIFY;
+        String nodeName = NodeName.CLARIFY;
         AnalysisState state = new AnalysisState();
         state.setQuestion(question);
         log.info("[graph] >>> 开始 traceId={}, question={}", traceId, question);
@@ -59,7 +60,7 @@ public class GraphRunner {
                 switch (current) {
                     case NodeName.CLARIFY -> {
                         node.get(NodeName.CLARIFY).apply(state, ctx);
-                        nextClarify(state);
+                        nodeName = nextClarify(state, current);
                         if (nodeName.equals(NodeName.DONE)) {
                             log.info("[graph] <<< 结束(澄清中断) traceId={}, cost={}ms, questionToUser={}",
                                     traceId, System.currentTimeMillis() - start, state.getQuestionToUser());
@@ -68,27 +69,27 @@ public class GraphRunner {
                     }
                     case NodeName.SCHEMA_RETRIEVE -> {
                         node.get(NodeName.SCHEMA_RETRIEVE).apply(state, ctx);
-                        nextSchemaRetrieve();
+                        nodeName = nextSchemaRetrieve(current);
                     }
                     case NodeName.SQL_GENERATE -> {
                         node.get(NodeName.SQL_GENERATE).apply(state, ctx);
-                        nextSqlGenerate();
+                        nodeName = nextSqlGenerate(current);
                     }
                     case NodeName.SQL_GUARD -> {
                         node.get(NodeName.SQL_GUARD).apply(state, ctx);
-                        nextSqlGuard(state);
+                        nodeName = nextSqlGuard(state, current);
                     }
                     case NodeName.SQL_EXECUTE -> {
                         node.get(NodeName.SQL_EXECUTE).apply(state, ctx);
-                        nextSqlExecute();
+                        nodeName = nextSqlExecute(current);
                     }
                     case NodeName.JUDGE -> {
                         node.get(NodeName.JUDGE).apply(state, ctx);
-                        nextSqlJudge(state);
+                        nodeName = nextSqlJudge(state, current);
                     }
                     case NodeName.SUMMARIZE -> {
                         node.get(NodeName.SUMMARIZE).apply(state, ctx);
-                        nextSummarize();
+                        nodeName = nextSummarize(current);
                     }
                     default -> {
                         // 原实现遇到未知节点名会一直空转，这里收敛为结束并留一条 ERROR
@@ -114,50 +115,55 @@ public class GraphRunner {
         }
     }
 
-    private void nextClarify(AnalysisState state) {
-        if (state.getNeedClarify().equals(Boolean.TRUE)) {
-            nodeName = NodeName.DONE;
-        } else {
-            nodeName = NodeName.SCHEMA_RETRIEVE;
-        }
-        log.info("[graph] clarify 路由 needClarify={} → {}", state.getNeedClarify(), nodeName);
+    private String nextClarify(AnalysisState state, String current) {
+        String next = Boolean.TRUE.equals(state.getNeedClarify())
+                ? NodeName.DONE : NodeName.SCHEMA_RETRIEVE;
+        log.info("[graph] clarify 路由 from={} → {}, needClarify={}", current, next, state.getNeedClarify());
+        return next;
     }
 
-    private void nextSchemaRetrieve() {
-        nodeName = NodeName.SQL_GENERATE;
+    private String nextSchemaRetrieve(String current) {
+        log.debug("[graph] 路由 from={} → {}", current, NodeName.SQL_GENERATE);
+        return NodeName.SQL_GENERATE;
     }
 
-    private void nextSqlGenerate() {
-        nodeName = NodeName.SQL_GUARD;
+    private String nextSqlGenerate(String current) {
+        log.debug("[graph] 路由 from={} → {}", current, NodeName.SQL_GUARD);
+        return NodeName.SQL_GUARD;
     }
 
-    private void nextSqlGuard(AnalysisState state) {
-        nodeName = state.getValidationResult().equals("pass") ? NodeName.SQL_EXECUTE : NodeName.SQL_GENERATE;
-        if (nodeName.equals(NodeName.SQL_GENERATE)) {
+    private String nextSqlGuard(AnalysisState state, String current) {
+        String next = state.getValidationResult().equals("pass")
+                ? NodeName.SQL_EXECUTE : NodeName.SQL_GENERATE;
+        if (next.equals(NodeName.SQL_GENERATE)) {
             state.setRetryCount(state.getRetryCount() + 1);
-            log.warn("[graph] sql_guard 拒绝，回退 sql_generate 修正：reason={}, retryCount={}",
-                    state.getError(), state.getRetryCount());
+            log.warn("[graph] sql_guard 拒绝，回退 sql_generate 修正：from={} → {}, reason={}, retryCount={}",
+                    current, next, state.getError(), state.getRetryCount());
         }
+        return next;
     }
 
-    private void nextSqlExecute() {
-        nodeName = NodeName.JUDGE;
+    private String nextSqlExecute(String current) {
+        log.debug("[graph] 路由 from={} → {}", current, NodeName.JUDGE);
+        return NodeName.JUDGE;
     }
 
-    private void nextSqlJudge(AnalysisState state) {
+    private String nextSqlJudge(AnalysisState state, String current) {
         String verdict = state.getVerdict();
-        nodeName = state.getError() == null ? NodeName.SUMMARIZE : NodeName.SQL_GENERATE;
+        String next = state.getError() == null ? NodeName.SUMMARIZE : NodeName.SQL_GENERATE;
         state.setVerdict(null); // 重置字段为 null，防止 JudgeNode 第二轮被持续污染
-        if (nodeName.equals(NodeName.SQL_GENERATE)) {
+        if (next.equals(NodeName.SQL_GENERATE)) {
             state.setRetryCount(state.getRetryCount() + 1);
-            log.warn("[graph] judge 判定 {}，回退 sql_generate 修正：reason={}, retryCount={}",
-                    verdict, state.getError(), state.getRetryCount());
+            log.warn("[graph] judge 判定 {}，回退 sql_generate 修正：from={} → {}, reason={}, retryCount={}",
+                    verdict, current, next, state.getError(), state.getRetryCount());
         } else {
-            log.info("[graph] judge 判定 {}，进入 summarize", verdict);
+            log.info("[graph] judge 判定 {}，from={} → 进入 summarize", verdict, current);
         }
+        return next;
     }
 
-    private void nextSummarize() {
-        nodeName = NodeName.DONE;
+    private String nextSummarize(String current) {
+        log.debug("[graph] 路由 from={} → {}", current, NodeName.DONE);
+        return NodeName.DONE;
     }
 }
