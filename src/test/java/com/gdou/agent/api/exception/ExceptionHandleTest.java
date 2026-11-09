@@ -1,9 +1,7 @@
-package com.gdou.test.api.exception;
+package com.gdou.agent.api.exception;
 
 import com.gdou.agent.api.constant.CodeConstant;
 import com.gdou.agent.api.constant.MsgConstant;
-import com.gdou.agent.api.exception.BusinessException;
-import com.gdou.agent.api.exception.ExceptionHandle;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;

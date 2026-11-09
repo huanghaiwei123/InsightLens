@@ -1,4 +1,4 @@
-package com.gdou.test.orchestration.node.impl;
+package com.gdou.agent.orchestration.node.impl;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
@@ -9,7 +9,6 @@ import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.meta.entity.TableRegistry;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
-import com.gdou.agent.orchestration.node.impl.ClarifyNode;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
