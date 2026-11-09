@@ -9,7 +9,7 @@ import lombok.Data;
 public  class GraphReturner {
     private  String questionToUser;
     private  String answer;
-    private GraphReturner() {
+    public GraphReturner() {
     }
     private GraphReturner(String questionToUser, String answer) {
         this.questionToUser = questionToUser;
@@ -27,6 +27,7 @@ public  class GraphReturner {
      public  static class Builder{
          private String questionToUser;
          private String answer;
+         private Builder() {}
          public Builder questionToUser(String questionToUser){
             this.questionToUser = questionToUser;
              return this;
