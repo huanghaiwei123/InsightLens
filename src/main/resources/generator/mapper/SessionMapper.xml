@@ -2,9 +2,9 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.gdou.api.mapper.SessionMapper">
+<mapper namespace="com.gdou.agent.api.mapper.SessionMapper">
 
-    <resultMap id="BaseResultMap" type="com.gdou.meta.entity.Session">
+    <resultMap id="BaseResultMap" type="com.gdou.agent.meta.entity.Session">
             <id property="id" column="id" />
             <result property="title" column="title" />
             <result property="createdAt" column="created_at" />
