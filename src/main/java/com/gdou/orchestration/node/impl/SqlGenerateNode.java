@@ -41,10 +41,13 @@ public class SqlGenerateNode implements Node {
     @Override
     public void apply(AnalysisState state, RunContext ctx) {
         long start = System.currentTimeMillis();
+        // retryCount 由 GraphRunner 的 next 方法在回退前 +1，语义是「已发生的回退次数」：
+        // 进入本节点时 0=首次生成，1/2=已用掉 1/2 次修正机会，3=三轮生成全失败。
+        // 因此修正重试实际上限是 2 次，模型最多生成 3 条 SQL。
         int retryCount = state.getRetryCount() == null ? 0 : state.getRetryCount();
         if (retryCount == 3) {
-            log.warn("[sql-generate] 重试次数已达上限 retryCount={}，终止本轮问答", retryCount);
-            throw new BusinessException("SQL 生成重试次数已达上限（3 次），终止本轮问答");
+            log.warn("[sql-generate] 2 次修正已用尽 retryCount={}，终止本轮问答", retryCount);
+            throw new BusinessException("SQL 生成重试次数已达上限（2 次修正），终止本轮问答");
         }
         boolean isRetry = retryCount > 0 && state.getError() != null;
         log.info("[sql-generate] >>> retryCount={}, 修正轮={}, 上一轮问题={}",
