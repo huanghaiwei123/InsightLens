@@ -42,3 +42,9 @@ data/
 application-local.yaml
 application-local.yml
 application-local.properties
+
+### 评测产物（采集结果与报告由 runner 运行时生成）
+scripts/eval/out/
+app.log
+__pycache__/
+*.pyc
