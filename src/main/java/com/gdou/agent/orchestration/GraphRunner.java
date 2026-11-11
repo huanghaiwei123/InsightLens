@@ -1,6 +1,5 @@
 package com.gdou.agent.orchestration;
 
-import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.orchestration.node.Node;
 import com.gdou.agent.orchestration.node.NodeName;
 import lombok.extern.slf4j.Slf4j;
@@ -14,9 +13,14 @@ import java.util.UUID;
  * 七节点状态机调度器：clarify → schema_retrieve → sql_generate → sql_guard
  * → sql_execute → judge → summarize，唯一回边是 ⑥/④ → ③ 的 SQL 修正循环。
  *
- * 链路追踪：run() 开始时把 traceId 写入 MDC（日志格式见 application.yaml），
- * 并构造 RunContext 传给每个节点。HTTP 入口若已生成 traceId 则复用，
- * 直接调用 run() 时自行生成；谁生成谁在 finally 里清理，避免污染线程池的下一个请求。
+ * 链路追踪：run() 从 MDC 取 traceId 写日志（日志格式见 application.yaml）；
+ * RunContext 由调用方构造，其 sink 决定节点事件是丢弃还是推给前端。
+ * HTTP 入口若已生成 traceId 则复用，直接调用 run() 时自行生成；
+ * 谁生成谁在 finally 里清理，避免污染线程池的下一个请求。
+ *
+ * 节点埋点：nodeStart / nodeEnd 都传「本节点名」current，不传下一节点名，
+ * 否则前端看到的是 node_start(sql_generate) 配 node_end(sql_guard)。
+ * 异常通知与连接收口由 HTTP 层负责，内核只保留 log.error 的完整堆栈。
  *
  * 并发安全：本类由 Spring 单例管理，但当前节点名是 run() 的局部变量；
  * next 方法统一「接收当前节点名、返回下一节点名」，不读写任何共享可变状态，
@@ -34,7 +38,8 @@ public class GraphRunner {
         this.node = node;
     }
 
-    public GraphReturner run(String question) {
+    public GraphReturner run(String question, RunContext ctx) {
+        StreamSink sink = ctx.sink();
         long start = System.currentTimeMillis();
         boolean ownsTrace = false;
         String traceId = MDC.get(TRACE_ID);
@@ -43,12 +48,12 @@ public class GraphRunner {
             MDC.put(TRACE_ID, traceId);
             ownsTrace = true;
         }
-        RunContext ctx = new RunContext(traceId, new NoOpStreamSink());
 
         String nodeName = NodeName.CLARIFY;
         AnalysisState state = new AnalysisState();
         state.setQuestion(question);
-        log.info("[graph] >>> 开始 traceId={}, question={}", traceId, question);
+        log.info("[graph] >>> 开始 traceId={}, sink={}, question={}",
+                traceId, sink.getClass().getSimpleName(), question);
 
         try {
             int step = 0;
@@ -58,6 +63,7 @@ public class GraphRunner {
                 long nodeStart = System.currentTimeMillis();
                 step++;
                 log.info("[graph] step={} 进入节点 {}", step, current);
+                sink.nodeStart(current);
                 switch (current) {
                     case NodeName.CLARIFY -> {
                         node.get(NodeName.CLARIFY).apply(state, ctx);
@@ -99,8 +105,10 @@ public class GraphRunner {
                         nodeName = NodeName.DONE;
                     }
                 }
+                long time = System.currentTimeMillis() - nodeStart;
                 log.info("[graph] step={} 节点 {} 完成 cost={}ms → 下一节点 {}",
-                        step, current, System.currentTimeMillis() - nodeStart, nodeName);
+                        step, current, time, nodeName);
+                sink.nodeEnd(current, time, state);
             }
             log.info("[graph] <<< 结束 traceId={}, cost={}ms, step={}, retryCount={}, answerLen={}",
                     traceId, System.currentTimeMillis() - start, step, state.getRetryCount(),
