@@ -1,5 +1,6 @@
 package com.gdou;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,7 +11,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * 冒烟测试：只验证「配置能连通大模型」这一件事。
  * 密钥、base-url、模型名任一写错，这里会立刻暴露，不用等业务代码跑起来。
+ * 会真实调用模型并消耗 token，且测试类所在包 com.gdou 找不到主类
+ * com.gdou.agent.InsightLensApplication，故默认不纳入单元测试；
+ * 验密钥时手动去掉 @Disabled 单独执行。
  */
+@Disabled("冒烟测试：真实调用大模型且依赖本地密钥，手动启用")
 @SpringBootTest
 class LlmSmokeTest {
 
