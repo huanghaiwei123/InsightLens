@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.List;
 
@@ -45,14 +46,19 @@ public class ClarifyNode implements Node {
     public void apply(AnalysisState state, RunContext ctx) {
         long start = System.currentTimeMillis();
         String question = state.getQuestion();
-        String systemMessage = prompt("message/ClarifyNode.txt");
+        // 相对时间需要锚点：把当前日期拼进 SystemMessage，不碰 userMessage（原始问题仍是第一行）
+        String baseDate = LocalDate.now().toString();
+        String systemMessage = prompt("message/ClarifyNode.txt")
+                + "\n\n## 当前日期\n" + baseDate
+                + "\n问题里的「今天 / 上周 / 近 30 天 / 今年」等相对时间，一律以该日期为基准换算成具体起止日期，"
+                + "并写进 clarified_question 与 assumptions 两处。";
         String tables = tableList();
         // 标题与 ClarifyNode.txt 的「1. 输入」逐字对齐，第三列是结构指纹不是列定义
         String userMessage = question + "\n\n候选表清单（表名 | 语义标签 | 结构指纹）：\n" + tables;
         List<Message> messages = List.of(
                 new SystemMessage(systemMessage),
                 new UserMessage(userMessage));
-        log.info("[clarify] >>> question={}, 候选表行数={}", question, tables.lines().count());
+        log.info("[clarify] >>> baseDate={}, question={}, 候选表行数={}", baseDate, question, tables.lines().count());
 
         String raw = LlmClient.call(messages);
         log.debug("[clarify] 模型返回原文：{}", raw);
