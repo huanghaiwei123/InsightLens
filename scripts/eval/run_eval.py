@@ -100,13 +100,30 @@ def post_question(base_url: str, question: str, timeout: float) -> tuple[int, di
         return resp.status, json.loads(resp.read().decode("utf-8"))
 
 
+def decode_log(chunk: bytes) -> str:
+    """日志编码由 JVM 默认字符集决定：Windows 常见 GBK，带 -Dfile.encoding=UTF-8 时是 UTF-8。
+
+    必须按 UTF-8 严格解码再回退 GBK，不能一上来就 errors="replace"：
+    中文别名（如 as 客单价）被替换成 U+FFFD 后，抓出来的 SQL 在 DuckDB 里
+    会报 Binder Error，题目被误判成 sql_error，而应用实际执行的 SQL 是对的。
+    """
+    try:
+        return chunk.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return chunk.decode("gbk")
+    except UnicodeDecodeError:
+        return chunk.decode("utf-8", errors="replace")
+
+
 def log_tail(path: Path, offset: int) -> tuple[str, int]:
     if not path.is_file():
         return "", offset
     with open(path, "rb") as f:
         f.seek(offset)
         chunk = f.read()
-        return chunk.decode("utf-8", errors="replace"), f.tell()
+        return decode_log(chunk), f.tell()
 
 
 def extract_sql(log_text: str) -> str | None:
@@ -331,7 +348,10 @@ def main() -> None:
     p_collect.add_argument("--base-url", default="http://127.0.0.1:8080")
     p_collect.add_argument("--log-file", default=None, help="应用日志文件，用于提取 generated_sql")
     p_collect.add_argument("--assets", default=None)
-    p_collect.add_argument("--timeout", type=float, default=120.0)
+    # 链路是三次串行模型调用，中转站抖动时单题可到 130s。120s 会在应用仍运行时
+    # 掐断连接，日志随后才落盘 → 已生成的 SQL 被记成 no_sql，P95 也被截成假的 120s。
+    p_collect.add_argument("--timeout", type=float, default=300.0,
+                           help="单题等待上限，需大于实际链路耗时，否则 SQL 会被误判为 no_sql")
     p_collect.add_argument("--settle", type=float, default=0.5, help="等待日志刷出的秒数")
     p_collect.set_defaults(func=cmd_collect)
 
