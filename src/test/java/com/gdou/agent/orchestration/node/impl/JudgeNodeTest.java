@@ -8,6 +8,7 @@ import com.gdou.agent.orchestration.RunContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Map;
@@ -34,7 +35,10 @@ class JudgeNodeTest {
     @BeforeEach
     void setUp() {
         llmClient = mock(LlmClient.class);
-        node = new JudgeNode(llmClient, new ObjectMapper());
+        node = new JudgeNode();
+        // 字段注入的 Bean 在纯单测里没有 Spring 容器，手动补齐依赖
+        ReflectionTestUtils.setField(node, "llmClient", llmClient);
+        ReflectionTestUtils.setField(node, "objectMapper", new ObjectMapper());
         state = new AnalysisState();
         state.setClarifiedQuestion("上周各品类退款率");
         state.setAssumptions(new String[]{"GMV 不含退款"});

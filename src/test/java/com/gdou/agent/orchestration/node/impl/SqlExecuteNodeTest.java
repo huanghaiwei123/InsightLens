@@ -8,6 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.mockito.ArgumentMatchers;
 
 import java.util.List;
@@ -35,7 +36,9 @@ class SqlExecuteNodeTest {
     @BeforeEach
     void setUp() {
         jdbc = mock(JdbcTemplate.class);
-        node = new SqlExecuteNode(jdbc);
+        node = new SqlExecuteNode();
+        // 字段注入的 Bean 在纯单测里没有 Spring 容器，手动补齐依赖
+        ReflectionTestUtils.setField(node, "jdbc", jdbc);
         state = new AnalysisState();
         state.setSql("select category, amount from sales limit 10");
     }

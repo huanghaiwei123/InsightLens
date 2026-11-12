@@ -5,6 +5,7 @@ import com.gdou.agent.orchestration.RunContext;
 import com.gdou.agent.orchestration.node.Node;
 import com.gdou.agent.orchestration.node.NodeName;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -17,11 +18,9 @@ import java.util.Map;
 @Slf4j
 @Service(NodeName.SQL_EXECUTE)
 public class SqlExecuteNode implements Node {
-    private final JdbcTemplate jdbc;
-
-    public SqlExecuteNode(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
-    }
+    // 节点依赖统一走字段注入：后续新增 Service 只需加一个 @Autowired 字段，不必改构造参数列表
+    @Autowired
+    private JdbcTemplate jdbc;
 
     @Override
     public void apply(AnalysisState state, RunContext ctx) {

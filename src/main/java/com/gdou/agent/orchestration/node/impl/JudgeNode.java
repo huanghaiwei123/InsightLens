@@ -11,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
@@ -23,13 +24,11 @@ import java.util.List;
 @Slf4j
 @Service(NodeName.JUDGE)
 public class JudgeNode implements Node {
-    private final LlmClient llmClient;
-    private final ObjectMapper objectMapper;
-
-    public JudgeNode(LlmClient llmClient, ObjectMapper objectMapper) {
-        this.llmClient = llmClient;
-        this.objectMapper = objectMapper;
-    }
+    // 节点依赖统一走字段注入：后续新增 Service 只需加一个 @Autowired 字段，不必改构造参数列表
+    @Autowired
+    private LlmClient llmClient;
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Override
     public void apply(AnalysisState state, RunContext ctx) {

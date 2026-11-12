@@ -8,6 +8,7 @@ import com.gdou.agent.orchestration.RunContext;
 import com.gdou.agent.orchestration.node.Node;
 import com.gdou.agent.orchestration.node.NodeName;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -36,13 +37,11 @@ public class SchemaRetrieveNode implements Node {
             "session", "message", "table_registry", "upload_batch",
             "evaluation_run", "eval_case_result", "trace_span");
 
-    private final JdbcTemplate jdbc;
-    private final TableRegistryMapper tableRegistryMapper;
-
-    public SchemaRetrieveNode(JdbcTemplate jdbc, TableRegistryMapper tableRegistryMapper) {
-        this.jdbc = jdbc;
-        this.tableRegistryMapper = tableRegistryMapper;
-    }
+    // 节点依赖统一走字段注入：后续新增 Service 只需加一个 @Autowired 字段，不必改构造参数列表
+    @Autowired
+    private JdbcTemplate jdbc;
+    @Autowired
+    private TableRegistryMapper tableRegistryMapper;
 
     @Override
     public void apply(AnalysisState state, RunContext ctx) {

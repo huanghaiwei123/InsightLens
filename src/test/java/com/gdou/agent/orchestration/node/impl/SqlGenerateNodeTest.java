@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
@@ -37,7 +38,10 @@ class SqlGenerateNodeTest {
     @BeforeEach
     void setUp() {
         llmClient = mock(LlmClient.class);
-        node = new SqlGenerateNode(llmClient, new ObjectMapper());
+        node = new SqlGenerateNode();
+        // 字段注入的 Bean 在纯单测里没有 Spring 容器，手动补齐依赖
+        ReflectionTestUtils.setField(node, "llmClient", llmClient);
+        ReflectionTestUtils.setField(node, "objectMapper", new ObjectMapper());
         state = new AnalysisState();
         state.setQuestion("上周退款率");
         state.setClarifiedQuestion("上周各品类退款率");
