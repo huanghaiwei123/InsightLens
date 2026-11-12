@@ -65,7 +65,7 @@ public class PersonalController {
     public Result chat(@RequestParam("userMsg") String userMsg,String sessionId) {
         Session session = sessionService.getById(sessionId);
         if (session.getTitle() == null) {
-            session.setTitle(sessionId);
+            session.setTitle(userMsg);
         }
         session.setUpdatedAt(LocalDateTime.now());
         sessionService.updateById(session);
@@ -97,7 +97,7 @@ public class PersonalController {
     public SseEmitter stream(@RequestParam("userMsg") String userMsg,String sessionId) {
         Session session = sessionService.getById(sessionId);
         if (session.getTitle() == null) {
-            session.setTitle(sessionId);
+            session.setTitle(userMsg);
         }
         session.setUpdatedAt(LocalDateTime.now());
         sessionService.updateById(session);
@@ -130,6 +130,7 @@ public class PersonalController {
                 if (mdc != null) MDC.setContextMap(mdc);
 
                 try {
+                    SessionHolder.set(session.getId());
                     RunContext ctx = new RunContext(traceId, sink);
                     GraphReturner returner = runner.run(userMsg, ctx);
                     sink.done(returner.getAnswer(), returner.getQuestionToUser());
@@ -143,6 +144,7 @@ public class PersonalController {
                 } finally {
                     // 线程池线程会复用，不清会污染下一个请求的 traceId
                     MDC.clear();
+                    SessionHolder.remove();
                 }
             });
             return emitter;
