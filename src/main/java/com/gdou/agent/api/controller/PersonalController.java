@@ -3,8 +3,11 @@ package com.gdou.agent.api.controller;
 import com.gdou.agent.api.common.Result;
 import com.gdou.agent.api.constant.CodeConstant;
 import com.gdou.agent.api.constant.MsgConstant;
+import com.gdou.agent.api.holder.SessionHolder;
+import com.gdou.agent.api.service.SessionService;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.infra.stream.SseStreamSink;
+import com.gdou.agent.meta.entity.Session;
 import com.gdou.agent.orchestration.GraphReturner;
 import com.gdou.agent.orchestration.GraphRunner;
 import com.gdou.agent.orchestration.RunContext;
@@ -13,12 +16,9 @@ import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
-
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.concurrent.Executor;
 
@@ -38,8 +38,38 @@ public class PersonalController {
     @Qualifier("sseExecutor")
     private Executor sseExecutor;
 
+    @Autowired
+    private SessionService sessionService;
+
+    /**
+     * 用户新建会话窗口
+     * @return
+     */
+    @GetMapping("/create")
+    public Result create() {
+        Session session = Session.builder()
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .build();
+        sessionService.save(session);
+        return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS, session.getId());
+    }
+
+    /**
+     * 用户发起非流式响应对话
+     * @param userMsg
+     * @param sessionId
+     * @return
+     */
     @PostMapping("/chat/overAll")
-    public Result chat(@RequestParam("userMsg") String userMsg) {
+    public Result chat(@RequestParam("userMsg") String userMsg,String sessionId) {
+        Session session = sessionService.getById(sessionId);
+        if (session.getTitle() == null) {
+            session.setTitle(sessionId);
+        }
+        session.setUpdatedAt(LocalDateTime.now());
+        sessionService.updateById(session);
+        SessionHolder.set(session.getId());
         // traceId 由 ChatInterceptor 在请求线程写入，同一请求的节点日志共用它
         String traceId = MDC.get(GraphRunner.TRACE_ID);
         long start = System.currentTimeMillis();
@@ -58,8 +88,20 @@ public class PersonalController {
         }
     }
 
+    /**
+     * 用户发起流式响应会话
+     * @param userMsg
+     * @return
+     */
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream(@RequestParam("userMsg") String userMsg) {
+    public SseEmitter stream(@RequestParam("userMsg") String userMsg,String sessionId) {
+        Session session = sessionService.getById(sessionId);
+        if (session.getTitle() == null) {
+            session.setTitle(sessionId);
+        }
+        session.setUpdatedAt(LocalDateTime.now());
+        sessionService.updateById(session);
+        SessionHolder.set(session.getId());
         // MDC 是 ThreadLocal：traceId 是值，mdc 是整份上下文快照，后者供子线程日志复用
         String traceId = MDC.get(GraphRunner.TRACE_ID);
         Map<String, String> mdc = MDC.getCopyOfContextMap();

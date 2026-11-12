@@ -4,8 +4,12 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Builder;
 import lombok.Data;
+import org.springframework.cglib.core.Local;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Date;
 
 /**
@@ -14,6 +18,7 @@ import java.util.Date;
  */
 @Data
 @TableName(value ="session")
+@Builder
 public class Session {
     /**
      * 用户会话id（自增主键）
@@ -29,66 +34,10 @@ public class Session {
     /**
      * 用户会话创建时间
      */
-    private Date createdAt;
+    private LocalDateTime createdAt;
 
     /**
      * 用户会话最后活跃时间（每轮消息后更新，用于会话列表排序）
      */
-    private Date updatedAt;
-
-    /**
-     * 用户会话id（自增主键）
-     */
-    public Integer getId() {
-        return id;
-    }
-
-    /**
-     * 用户会话id（自增主键）
-     */
-    public void setId(Integer id) {
-        this.id = id;
-    }
-
-    /**
-     * 用户会话标题（默认取首条提问前 30 字，可重命名）
-     */
-    public String getTitle() {
-        return title;
-    }
-
-    /**
-     * 用户会话标题（默认取首条提问前 30 字，可重命名）
-     */
-    public void setTitle(String title) {
-        this.title = title;
-    }
-
-    /**
-     * 用户会话创建时间
-     */
-    public Date getCreatedAt() {
-        return createdAt;
-    }
-
-    /**
-     * 用户会话创建时间
-     */
-    public void setCreatedAt(Date createdAt) {
-        this.createdAt = createdAt;
-    }
-
-    /**
-     * 用户会话最后活跃时间（每轮消息后更新，用于会话列表排序）
-     */
-    public Date getUpdatedAt() {
-        return updatedAt;
-    }
-
-    /**
-     * 用户会话最后活跃时间（每轮消息后更新，用于会话列表排序）
-     */
-    public void setUpdatedAt(Date updatedAt) {
-        this.updatedAt = updatedAt;
-    }
+    private LocalDateTime updatedAt;
 }

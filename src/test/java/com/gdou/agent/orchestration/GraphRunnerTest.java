@@ -3,6 +3,7 @@ package com.gdou.agent.orchestration;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.gdou.agent.api.service.MessageService;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.orchestration.node.Node;
 import com.gdou.agent.orchestration.node.NodeName;
@@ -11,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -21,6 +23,7 @@ import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 /**
  * 状态机调度：节点顺序、澄清中断、两条修正回边、retryCount 语义、MDC 生命周期、节点埋点。
@@ -46,6 +49,13 @@ class GraphRunnerTest {
     /** 流式或埋点断言：换成记录型 sink */
     private static RunContext testContext(StreamSink sink) {
         return new RunContext("unit-test", sink);
+    }
+
+    /** GraphRunner 用 @Autowired 注入 MessageService 做会话落库；纯单测没有容器，手动塞 mock 避免 NPE */
+    private static GraphRunner newRunner(Map<String, Node> nodes) {
+        GraphRunner runner = new GraphRunner(nodes);
+        ReflectionTestUtils.setField(runner, "messageService", mock(MessageService.class));
+        return runner;
     }
 
     /** 收集节点事件，验证 nodeStart / nodeEnd 报的是本节点名 */
@@ -102,7 +112,7 @@ class GraphRunnerTest {
     @DisplayName("正常链路按 ①→⑦ 顺序各走一次，返回答案")
     void fullHappyPath() {
         List<String> order = new ArrayList<>();
-        GraphReturner result = new GraphRunner(nodes(order, happyPath())).run("上周退款率", testContext());
+        GraphReturner result = newRunner(nodes(order, happyPath())).run("上周退款率", testContext());
 
         assertThat(order).containsExactly(
                 NodeName.CLARIFY, NodeName.SCHEMA_RETRIEVE, NodeName.SQL_GENERATE,
@@ -120,7 +130,7 @@ class GraphRunnerTest {
             s.setNeedClarify(true);
             s.setQuestionToUser("「这次」指哪次考试？");
         });
-        GraphReturner result = new GraphRunner(nodes(order, b)).run("这次平均分怎么样", testContext());
+        GraphReturner result = newRunner(nodes(order, b)).run("这次平均分怎么样", testContext());
 
         assertThat(order).containsExactly(NodeName.CLARIFY);
         assertThat(result.getQuestionToUser()).isEqualTo("「这次」指哪次考试？");
@@ -147,7 +157,7 @@ class GraphRunnerTest {
                 s.setError(null); // 真实节点会清，否则 nextSqlJudge 会再次打回
             }
         });
-        GraphRunner runner = new GraphRunner(nodes(order, b));
+        GraphRunner runner = newRunner(nodes(order, b));
 
         GraphReturner result = runner.run("查一下销量", testContext());
 
@@ -183,7 +193,7 @@ class GraphRunnerTest {
             }
         });
 
-        GraphReturner result = new GraphRunner(nodes(order, b)).run("上周各品类退款率", testContext());
+        GraphReturner result = newRunner(nodes(order, b)).run("上周各品类退款率", testContext());
 
         assertThat(result.getAnswer()).isEqualTo("上周退款率 3.2%");
         assertThat(retrySeen).containsExactly(0, 1);
@@ -197,7 +207,7 @@ class GraphRunnerTest {
         List<String> order = new ArrayList<>();
         RecordingStreamSink sink = new RecordingStreamSink();
 
-        new GraphRunner(nodes(order, happyPath())).run("上周退款率", testContext(sink));
+        newRunner(nodes(order, happyPath())).run("上周退款率", testContext(sink));
 
         assertThat(order).hasSize(7);
         assertThat(sink.starts).isEqualTo(order);
@@ -222,7 +232,7 @@ class GraphRunnerTest {
         });
         RecordingStreamSink sink = new RecordingStreamSink();
 
-        new GraphRunner(nodes(order, b)).run("查一下销量", testContext(sink));
+        newRunner(nodes(order, b)).run("查一下销量", testContext(sink));
 
         assertThat(java.util.Collections.frequency(sink.starts, NodeName.SQL_GENERATE)).isEqualTo(2);
         assertThat(sink.starts).isEqualTo(order);
@@ -239,7 +249,7 @@ class GraphRunnerTest {
         Logger graphLogger = (Logger) LoggerFactory.getLogger(GraphRunner.class);
         graphLogger.addAppender(appender);
         try {
-            new GraphRunner(nodes(new ArrayList<>(), happyPath())).run("问题", testContext());
+            newRunner(nodes(new ArrayList<>(), happyPath())).run("问题", testContext());
             assertThat(appender.list).isNotEmpty();
             String traceId = appender.list.get(0).getMDCPropertyMap().get(GraphRunner.TRACE_ID);
             assertThat(traceId).isNotBlank().hasSize(8);
@@ -256,7 +266,7 @@ class GraphRunnerTest {
     @DisplayName("HTTP 入口已有 traceId 时复用且不清理（清理归拦截器）")
     void reusesPresetTrace() {
         MDC.put(GraphRunner.TRACE_ID, "preset01");
-        new GraphRunner(nodes(new ArrayList<>(), happyPath())).run("问题", testContext());
+        newRunner(nodes(new ArrayList<>(), happyPath())).run("问题", testContext());
         assertThat(MDC.get(GraphRunner.TRACE_ID)).isEqualTo("preset01");
     }
 
@@ -269,7 +279,7 @@ class GraphRunnerTest {
             throw new IllegalStateException("boom");
         });
 
-        assertThatThrownBy(() -> new GraphRunner(nodes(new ArrayList<>(), b)).run("问题", testContext()))
+        assertThatThrownBy(() -> newRunner(nodes(new ArrayList<>(), b)).run("问题", testContext()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("boom");
         assertThat(MDC.get(GraphRunner.TRACE_ID)).isNull();

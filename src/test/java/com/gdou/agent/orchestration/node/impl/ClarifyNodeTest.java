@@ -3,7 +3,9 @@ package com.gdou.agent.orchestration.node.impl;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.gdou.agent.api.mapper.TableRegistryMapper;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.gdou.agent.api.service.MessageService;
+import com.gdou.agent.api.service.TableRegistryService;
 import com.gdou.agent.infra.LlmClient;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.meta.entity.TableRegistry;
@@ -11,6 +13,7 @@ import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,7 +40,7 @@ class ClarifyNodeTest {
     private static final RunContext CTX = new RunContext("clarify-test", new NoOpStreamSink());
 
     private LlmClient llmClient;
-    private TableRegistryMapper mapper;
+    private TableRegistryService registryService;
     private ClarifyNode node;
     private AnalysisState state;
 
@@ -56,13 +59,19 @@ class ClarifyNodeTest {
     @BeforeEach
     void setUp() {
         llmClient = mock(LlmClient.class);
-        mapper = mock(TableRegistryMapper.class);
-        node = new ClarifyNode(llmClient, new ObjectMapper(), mapper);
+        registryService = mock(TableRegistryService.class);
+        node = new ClarifyNode();
+        // 节点改成 @Autowired 字段注入后纯单测没有 Spring 容器，手动补齐依赖；
+        // MessageService 只需一个 mock，落库不是本测试要验的行为。
+        ReflectionTestUtils.setField(node, "LlmClient", llmClient);
+        ReflectionTestUtils.setField(node, "objectMapper", new ObjectMapper());
+        ReflectionTestUtils.setField(node, "tableRegistryService", registryService);
+        ReflectionTestUtils.setField(node, "messageService", mock(MessageService.class));
         state = new AnalysisState();
         state.setQuestion("这次平均分怎么样");
         doReturn(List.of(registry("math_score", "2026 春季期中数学", "class:int|score:decimal"),
                 registry("chinese_score", "2026 春季期中语文", "class:int|score:decimal")))
-                .when(mapper).selectList(any());
+                .when(registryService).list(any(LambdaQueryWrapper.class));
     }
 
     private static TableRegistry registry(String name, String tag, String schemaKey) {
@@ -146,7 +155,7 @@ class ClarifyNodeTest {
     @Test
     @DisplayName("注册表为空时给出明确占位文案，不让模型对着空清单猜")
     void emptyRegistry() {
-        doReturn(List.<TableRegistry>of()).when(mapper).selectList(any());
+        doReturn(List.<TableRegistry>of()).when(registryService).list(any(LambdaQueryWrapper.class));
         when(llmClient.call(anyList())).thenReturn(
                 "{\"clarified_question\":\"平均分\",\"assumptions\":[],\"need_clarify\":true,"
                         + "\"question_to_user\":\"请先上传数据\",\"selected_tables\":[]}");

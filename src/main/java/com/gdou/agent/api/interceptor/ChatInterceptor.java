@@ -1,5 +1,6 @@
 package com.gdou.agent.api.interceptor;
 
+import com.gdou.agent.api.holder.SessionHolder;
 import com.gdou.agent.orchestration.GraphRunner;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -31,5 +32,6 @@ public class ChatInterceptor implements HandlerInterceptor {
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) throws Exception {
         MDC.remove(GraphRunner.TRACE_ID);
+        SessionHolder.remove();
     }
 }

@@ -1,13 +1,21 @@
 package com.gdou.agent.orchestration;
 
+import com.gdou.agent.api.holder.SessionHolder;
+import com.gdou.agent.api.service.MessageService;
+import com.gdou.agent.meta.entity.Message;
 import com.gdou.agent.orchestration.node.Node;
 import com.gdou.agent.orchestration.node.NodeName;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.UUID;
+
+
 
 /**
  * 七节点状态机调度器：clarify → schema_retrieve → sql_generate → sql_guard
@@ -33,6 +41,9 @@ public class GraphRunner {
     public static final String TRACE_ID = "traceId";
 
     private final Map<String, Node> node;
+
+    @Autowired
+    private MessageService messageService;
 
     public GraphRunner(Map<String, Node> node) {
         this.node = node;
@@ -129,6 +140,8 @@ public class GraphRunner {
         String next = Boolean.TRUE.equals(state.getNeedClarify())
                 ? NodeName.DONE : NodeName.SCHEMA_RETRIEVE;
         log.info("[graph] clarify 路由 from={} → {}, needClarify={}", current, next, state.getNeedClarify());
+        buildMessage(state.getAnswer(),"user");
+        if(state.getNeedClarify()) buildMessage(state.getQuestionToUser(),"assistant");
         return next;
     }
 
@@ -175,5 +188,21 @@ public class GraphRunner {
     private String nextSummarize(String current) {
         log.debug("[graph] 路由 from={} → {}", current, NodeName.DONE);
         return NodeName.DONE;
+    }
+
+    public void buildMessage(String msg,String role){
+        Integer id = SessionHolder.get();
+        Message message = Message.builder()
+                .sessionId(id)
+                .content(msg)
+                .role(role)
+                .createdAt(LocalDateTime.now())
+                .build();
+        boolean save = messageService.save(message);
+        if (save) {
+            log.info("窗口{}对话信息落库成功,信息落库所得id:{}",id, message.getId());
+        }else{
+            log.error("窗口{}对话信息添加失败,请检查原因",id);
+        }
     }
 }

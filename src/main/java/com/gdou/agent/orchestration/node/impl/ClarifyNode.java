@@ -4,9 +4,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gdou.agent.api.holder.SessionHolder;
 import com.gdou.agent.api.mapper.TableRegistryMapper;
+import com.gdou.agent.api.service.MessageService;
+import com.gdou.agent.api.service.TableRegistryService;
+import com.gdou.agent.api.service.TraceSpanService;
 import com.gdou.agent.infra.LlmClient;
 import com.gdou.agent.meta.entity.TableRegistry;
+import com.gdou.agent.meta.entity.TraceSpan;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
 import com.gdou.agent.orchestration.node.Node;
@@ -16,13 +21,19 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
 
@@ -32,15 +43,14 @@ import java.util.List;
 @Slf4j
 @Service(NodeName.CLARIFY)
 public class ClarifyNode implements Node {
-    private final LlmClient LlmClient;
-    private final ObjectMapper objectMapper;
-    private final TableRegistryMapper tableRegistryMapper;
-
-    public ClarifyNode(LlmClient LlmClient, ObjectMapper objectMapper, TableRegistryMapper tableRegistryMapper) {
-        this.LlmClient = LlmClient;
-        this.objectMapper = objectMapper;
-        this.tableRegistryMapper = tableRegistryMapper;
-    }
+    @Autowired
+    private LlmClient LlmClient;
+    @Autowired
+    private ObjectMapper objectMapper;
+    @Autowired
+    private TableRegistryService tableRegistryService;
+    @Autowired
+    private MessageService messageService;
 
     @Override
     public void apply(AnalysisState state, RunContext ctx) {
@@ -52,6 +62,7 @@ public class ClarifyNode implements Node {
                 + "\n\n## 当前日期\n" + baseDate
                 + "\n问题里的「今天 / 上周 / 近 30 天 / 今年」等相对时间，一律以该日期为基准换算成具体起止日期，"
                 + "并写进 clarified_question 与 assumptions 两处。";
+        buildMessage(systemMessage, "system");
         String tables = tableList();
         // 标题与 ClarifyNode.txt 的「1. 输入」逐字对齐，第三列是结构指纹不是列定义
         String userMessage = question + "\n\n候选表清单（表名 | 语义标签 | 结构指纹）：\n" + tables;
@@ -68,9 +79,9 @@ public class ClarifyNode implements Node {
         // candidateTables 从此语义为「clarify 选中的表」，schema_retrieve 空时才兜底全量
         state.setCandidateTables(
                 node.selectedTables() == null ? List.of() : List.of(node.selectedTables()));
-
+        long end = System.currentTimeMillis();
         log.info("[clarify] <<< cost={}ms, needClarify={}, clarifiedQuestion={}, assumptions={}, selectedTables={}, questionToUser={}",
-                System.currentTimeMillis() - start, state.getNeedClarify(), state.getClarifiedQuestion(),
+                end - start, state.getNeedClarify(), state.getClarifiedQuestion(),
                 Arrays.toString(state.getAssumptions()), state.getCandidateTables(), state.getQuestionToUser());
     }
 
@@ -82,7 +93,7 @@ public class ClarifyNode implements Node {
     private String tableList() {
         LambdaQueryWrapper<TableRegistry> wrapper = new LambdaQueryWrapper<>();
         wrapper.select(TableRegistry::getTableName, TableRegistry::getDataTag, TableRegistry::getSchemaKey);
-        List<TableRegistry> tables = tableRegistryMapper.selectList(wrapper);
+        List<TableRegistry> tables = tableRegistryService.list(wrapper);
         if (tables.isEmpty()) {
             log.warn("[clarify] table_registry 为空，候选表清单无表可选");
             return "（库中暂无任何数据表）";
@@ -127,6 +138,22 @@ public class ClarifyNode implements Node {
         } catch (IOException e) {
             log.error("[clarify] 提示词读取失败 path={}", path, e);
             throw new RuntimeException(e);
+        }
+    }
+
+    public void buildMessage(String msg,String role){
+        Integer id = SessionHolder.get();
+        com.gdou.agent.meta.entity.Message message = com.gdou.agent.meta.entity.Message.builder()
+                .sessionId(id)
+                .content(msg)
+                .role(role)
+                .createdAt(LocalDateTime.now())
+                .build();
+        boolean save = messageService.save(message);
+        if (save) {
+            log.info("窗口{}对话信息落库成功,信息落库所得id:{}",id, message.getId());
+        }else{
+            log.error("窗口{}对话信息添加失败,请检查原因",id);
         }
     }
 }
