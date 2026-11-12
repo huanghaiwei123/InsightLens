@@ -51,9 +51,10 @@ class GraphRunnerTest {
         return new RunContext("unit-test", sink);
     }
 
-    /** GraphRunner 用 @Autowired 注入 MessageService 做会话落库；纯单测没有容器，手动塞 mock 避免 NPE */
+    /** GraphRunner 的 node / messageService 都是 @Autowired 字段；纯单测没有容器，手动塞入假节点与 mock */
     private static GraphRunner newRunner(Map<String, Node> nodes) {
-        GraphRunner runner = new GraphRunner(nodes);
+        GraphRunner runner = new GraphRunner();
+        ReflectionTestUtils.setField(runner, "node", nodes);
         ReflectionTestUtils.setField(runner, "messageService", mock(MessageService.class));
         return runner;
     }

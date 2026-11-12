@@ -37,17 +37,14 @@ import java.util.UUID;
 @Slf4j
 @Component
 public class GraphRunner {
-
     public static final String TRACE_ID = "traceId";
 
-    private final Map<String, Node> node;
+    @Autowired
+    private  Map<String, Node> node;
 
     @Autowired
     private MessageService messageService;
-
-    public GraphRunner(Map<String, Node> node) {
-        this.node = node;
-    }
+    
 
     public GraphReturner run(String question, RunContext ctx) {
         StreamSink sink = ctx.sink();
