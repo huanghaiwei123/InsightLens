@@ -79,14 +79,40 @@ public class SchemaRetrieveNode implements Node {
         log.debug("[schema] 查询 DDL：{} | 参数={}", sql, wantTables);
 
         List<String> ddlList = jdbc.query(sql, (rs, rowNum) -> rs.getString("sql"), wantTables.toArray());
-        String schemas = ddlList.stream()
+        String ddl = ddlList.stream()
                 .filter(Objects::nonNull)
                 .collect(Collectors.joining("\n"));
-        state.setTableSchemas(schemas.isEmpty() ? null : schemas);
-        if (schemas.isEmpty()) {
+
+        // 口径词典写在业务表的 COMMENT ON TABLE / COLUMN 里，DuckDB 存进 catalog，
+        // 但 duckdb_tables().sql 只有 CREATE TABLE 语句、不带注释。这里补注入，
+        // 否则模型只看到列名与类型，不知道 status 枚举、GMV / 退款率口径、时间边界。
+        // 只取 table_registry 登记的业务表：7 张系统表带几十行列注释，全塞会稀释提示词。
+        String businessOnly = " and lower(table_name) in (select lower(table_name) from table_registry)";
+        List<String> tableComments = jdbc.query(
+                "select '-- 表注释 ' || table_name || '：' || comment from duckdb_tables()"
+                        + " where schema_name = 'main' and comment is not null and comment <> ''"
+                        + businessOnly,
+                (rs, rowNum) -> rs.getString(1).replace("\n", " "));
+        List<String> columnComments = jdbc.query(
+                "select '-- 列注释 ' || table_name || '.' || column_name || '：' || comment from duckdb_columns()"
+                        + " where schema_name = 'main' and comment is not null and comment <> ''"
+                        + businessOnly
+                        + " order by table_name, column_index",
+                (rs, rowNum) -> rs.getString(1).replace("\n", " "));
+
+        StringBuilder sb = new StringBuilder(ddl);
+        if (!tableComments.isEmpty() || !columnComments.isEmpty()) {
+            sb.append("\n\n-- 库内登记的业务口径（COMMENT ON TABLE / COLUMN），与表结构同等权威：\n");
+            tableComments.forEach(line -> sb.append(line).append('\n'));
+            columnComments.forEach(line -> sb.append(line).append('\n'));
+        }
+        String tableSchemas = sb.toString().trim();
+        state.setTableSchemas(tableSchemas.isEmpty() ? null : tableSchemas);
+        if (ddl.isEmpty()) {
             log.warn("[schema] 未取到任何 DDL，后续 SQL 生成将缺少表结构；wantTables={}", wantTables);
         }
-        log.info("[schema] <<< cost={}ms, 请求表数={}, 命中 DDL 条数={}, DDL 字符数={}",
-                System.currentTimeMillis() - start, wantTables.size(), ddlList.size(), schemas.length());
+        log.info("[schema] <<< cost={}ms, 请求表数={}, 命中 DDL 条数={}, 口径注释行数={}, tableSchemas 字符数={}",
+                System.currentTimeMillis() - start, wantTables.size(), ddlList.size(),
+                tableComments.size() + columnComments.size(), tableSchemas.length());
     }
 }
