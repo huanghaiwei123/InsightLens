@@ -247,6 +247,17 @@ def copy_into(con, table: str, csv_path: Path) -> None:
     )
 
 
+# 业务表的语义标签：ClarifyNode 只按「表名 | 语义标签 | 结构指纹」选表，
+# 标签里必须带关键字段与口径，否则模型无法把「GMV」「退款率」映射到正确的表。
+BUSINESS_TAGS = {
+    "users": "用户档案：城市、注册渠道、注册时间（按城市分析客单价时关联 orders.user_id）",
+    "products": "商品目录：商品名、品类、标价、库存、在售状态（status=1 在售，stock 库存）",
+    "orders": "订单主表：实付金额 pay_amount、支付时间 pay_time、状态 status、下单用户 user_id（GMV / 客单价 / 退款率的主表）",
+    "order_items": "订单明细：order_id、product_id、购买件数 quantity、成交单价 price（销量 = SUM(quantity)）",
+    "refunds": "退款单：order_id、退款原因 reason、退款金额 amount、退款时间（退款率按订单数算）",
+}
+
+
 def create_schema(con, assets: Path, force: bool) -> None:
     # 应用本身没有自动建表机制。ClarifyNode / SchemaRetrieveNode 会查
     # table_registry、upload_batch 等元数据表，评测库必须一并初始化，
@@ -264,6 +275,58 @@ def create_schema(con, assets: Path, force: bool) -> None:
         for table in reversed(CSV_TABLES):
             con.execute(f"DROP TABLE IF EXISTS {table}")
     con.execute(schema_path.read_text(encoding="utf-8"))
+
+
+def schema_key(con, table: str) -> str:
+    """结构指纹：用户列名小写 + 类型族，按列名排序后以 | 拼接（与 InsightLens.sql 注释口径一致）。"""
+    rows = con.execute(
+        "SELECT column_name, data_type FROM duckdb_columns() "
+        "WHERE schema_name = 'main' AND table_name = ? ORDER BY column_name",
+        [table],
+    ).fetchall()
+
+    def family(data_type: str) -> str:
+        t = data_type.upper()
+        if "INT" in t:
+            return "integer"
+        if any(k in t for k in ("DECIMAL", "DOUBLE", "FLOAT", "REAL", "NUMERIC")):
+            return "decimal"
+        if any(k in t for k in ("TIMESTAMP", "DATE", "TIME")):
+            return "timestamp"
+        return "varchar"
+
+    return "|".join(f"{name.lower()}:{family(dtype)}" for name, dtype in rows)
+
+
+def register_tables(con) -> None:
+    """把业务表登记进 table_registry。
+
+    ClarifyNode.tableList() 与 SchemaRetrieveNode 的兜底都查这张表；只建表不登记时，
+    候选表清单会退化成「库中暂无任何数据表」，模型拿不到业务表 DDL，
+    只能生成 CAST(NULL ...) WHERE false 这类占位 SQL（首次真实基线 0/6 的根因）。
+    口径词典存在 orders 表的 COMMENT ON TABLE 里，而 clarify 在 schema_retrieve 之前执行、
+    看不到 DDL 注释，所以把 catalog 注释压平后拼进语义标签：口径只有一个来源（DDL），
+    造数脚本不必再抄一份。
+    upload_batch 不登记：示例表没有 _batch_id 列，登记反而会诱导模型写出不存在的列。
+    """
+    con.execute("DELETE FROM table_registry")
+    created_at = datetime.combine(EVAL_DATE, datetime.min.time())
+    for table, tag in BUSINESS_TAGS.items():
+        row = con.execute(
+            "SELECT comment FROM duckdb_tables() "
+            "WHERE schema_name = 'main' AND table_name = ?",
+            [table],
+        ).fetchone()
+        comment = row[0] if row and row[0] else ""
+        # 候选表清单按换行分「一行一张表」，注释里的换行必须压平，
+        # 否则模型会把口径的每一行误当成一张表。
+        full_tag = tag if not comment else tag + "；库内口径：" + comment.replace("\n", "；")
+        con.execute(
+            "INSERT INTO table_registry(table_name, schema_key, data_tag, created_at) "
+            "VALUES (?, ?, ?, ?)",
+            [table, schema_key(con, table), full_tag, created_at],
+        )
+    print(f"[seed] 元数据登记: table_registry {len(BUSINESS_TAGS)} 行")
 
 
 def validate_gold(con, assets: Path) -> None:
@@ -320,6 +383,7 @@ def main() -> None:
             for t in CSV_TABLES
         }
         print(f"[seed] 落库校验: {counts}")
+        register_tables(con)
         print(f"[seed] 基准日 EVAL_DATE={EVAL_DATE}, seed={SEED}, db={db_path}")
         if not args.skip_validate:
             validate_gold(con, assets)
