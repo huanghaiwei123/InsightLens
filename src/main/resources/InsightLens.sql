@@ -31,11 +31,51 @@
 -- 组 A：会话持久化（I1 后半段 ~ I2）
 -- =============================================================================
 
+CREATE SEQUENCE IF NOT EXISTS seq_category_id START 1;
+
+CREATE TABLE IF NOT EXISTS category(
+                                       id          INTEGER PRIMARY KEY DEFAULT nextval('seq_category_id'),
+    name        VARCHAR NOT NULL UNIQUE,   -- 分类名 = workspace 下的文件夹名，如 电商运营
+    description VARCHAR,
+    created_at  TIMESTAMP NOT NULL
+    );
+COMMENT ON TABLE  category         IS '大分类：隔离单元，一个分类 = 一个文件夹 = 一个对话窗口';
+COMMENT ON COLUMN category.name    IS '分类名，唯一；对应 agent.workspace 下的目录名';
+COMMENT ON COLUMN category.created_at IS '创建时间';
+
+CREATE SEQUENCE IF NOT EXISTS seq_file_view_id START 1;
+
+CREATE TABLE IF NOT EXISTS file_view(
+                                        id           INTEGER PRIMARY KEY DEFAULT nextval('seq_file_view_id'),
+    category_id  INTEGER NOT NULL,       -- 所属大分类，隔离的过滤键
+    upload_id    VARCHAR NOT NULL,       -- 文件级 UUID：一个文件一个，多 sheet 共享
+    orig_name    VARCHAR NOT NULL,       -- 原始文件名（含版本+日期后缀），前端报表展示
+    file_path    VARCHAR NOT NULL,       -- 相对 agent.workspace 的路径，如 <uuid>/<name>.xlsx
+    sheet_name   VARCHAR NOT NULL,       -- Excel 内的工作表名，可中文，仅展示与映射
+    view_name    VARCHAR NOT NULL UNIQUE,-- DuckDB 视图名，模型看到的"表名"，ASCII snake_case
+    column_types JSON,                   -- 列名+类型，建 VIEW 时 read_xlsx(types=...) 用
+    row_count    BIGINT,                 -- 本 sheet 行数，回答回显"基于 N 行"
+    status       VARCHAR NOT NULL,       -- success / failed
+    created_at   TIMESTAMP NOT NULL      -- 上传时间，前端报表的时间轴
+    );
+COMMENT ON TABLE file_view IS '文件/视图注册表：一行=一个sheet=一个VIEW；数据行不入库，文件是唯一数据源';
+COMMENT ON COLUMN file_view.category_id  IS '所属大分类，逻辑关联 category.id；三节点按此过滤实现隔离';
+COMMENT ON COLUMN file_view.upload_id    IS '文件级UUID，删除与文件列表聚合按此定位；orig_name 仅展示不做删除条件';
+COMMENT ON COLUMN file_view.view_name    IS 'DuckDB视图名，模型SQL里写的表名；必须ASCII snake_case，禁中文标识符';
+COMMENT ON COLUMN file_view.sheet_name   IS 'Excel原sheet名；用户口语里说"订单明细"时靠它映射到 view_name';
+COMMENT ON COLUMN file_view.column_types IS '列类型固化的JSON，建VIEW时传给read_xlsx(types=)，避免每次重推断导致评测漂移';
+COMMENT ON COLUMN file_view.status       IS 'success / failed；单个sheet解析失败不影响同文件其他sheet';
+
+CREATE INDEX IF NOT EXISTS idx_file_view_category ON file_view (category_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_file_view_upload   ON file_view (upload_id);
+
+
 CREATE SEQUENCE IF NOT EXISTS seq_session_id START 1;
 
 CREATE TABLE IF NOT EXISTS session(
                                       id          INTEGER PRIMARY KEY DEFAULT nextval('seq_session_id'),
     title       VARCHAR NOT NULL,
+    category_id INTEGER,   -- 窗口绑定的大分类；逻辑关联 category.id
     created_at  TIMESTAMP NOT NULL,
     updated_at  TIMESTAMP NOT NULL
     );
@@ -44,6 +84,7 @@ COMMENT ON COLUMN session.id         IS '用户会话id（自增主键）';
 COMMENT ON COLUMN session.title      IS '用户会话标题（默认取首条提问前 30 字，可重命名）';
 COMMENT ON COLUMN session.created_at IS '用户会话创建时间';
 COMMENT ON COLUMN session.updated_at IS '用户会话最后活跃时间（每轮消息后更新，用于会话列表排序）';
+COMMENT ON COLUMN session.category_id IS '会话绑定的大分类；为空表示未绑定。Agent 检索范围由此限定';
 
 
 CREATE SEQUENCE IF NOT EXISTS seq_message_id START 1;
@@ -84,46 +125,6 @@ CREATE INDEX IF NOT EXISTS idx_message_session_created
 --     upload_id  → 哪个文件（UUID，文件列表聚合 + 删除定位）
 --     _batch_id  → 哪批数据行（= upload_batch.id，存在物理表的系统列里）
 -- =============================================================================
-
-CREATE TABLE IF NOT EXISTS table_registry(
-                                             table_name  VARCHAR PRIMARY KEY,
-                                             schema_key  VARCHAR NOT NULL,
-                                             data_tag    VARCHAR,
-                                             created_at  TIMESTAMP NOT NULL
-);
-COMMENT ON TABLE  table_registry             IS '物理表注册表：每张分析数据表一行，存结构指纹与语义标签，建表前据此判断复用还是新建';
-COMMENT ON COLUMN table_registry.table_name  IS '物理表名，小写字母/数字/下划线；撞名追加 _2/_3，后缀由后端算，不让模型数';
-COMMENT ON COLUMN table_registry.schema_key  IS '结构指纹：用户列名小写 + 类型族，按列名排序后以 | 拼接，如 amount:decimal|order_date:timestamp；不含 _batch_id，不做哈希。查重必须走索引，不要用 information_schema 实时算';
-COMMENT ON COLUMN table_registry.data_tag    IS '语义标签（人可读），如「语文成绩」「数学成绩」。只在新建表时生成一次，复用表时沿用旧值以防标签漂移；为空表示生成失败，已回退为文件名主干';
-COMMENT ON COLUMN table_registry.created_at  IS '建表时间';
-
-CREATE INDEX IF NOT EXISTS idx_registry_schema ON table_registry (schema_key);
-
-
-CREATE SEQUENCE IF NOT EXISTS seq_upload_batch_id START 1;
-
-CREATE TABLE IF NOT EXISTS upload_batch(
-                                           id          INTEGER PRIMARY KEY DEFAULT nextval('seq_upload_batch_id'),
-    upload_id   VARCHAR NOT NULL,
-    table_name  VARCHAR NOT NULL,
-    orig_name   VARCHAR NOT NULL,
-    sheet_name  VARCHAR,
-    row_count   BIGINT,
-    status      VARCHAR NOT NULL,
-    created_at  TIMESTAMP NOT NULL
-    );
-COMMENT ON TABLE  upload_batch            IS '导入批次表：一行 = 一个 sheet 的导入；单 sheet 文件即一行一个文件，多 sheet 文件拆多行共享 upload_id。删文件只删数据行、不删表结构';
-COMMENT ON COLUMN upload_batch.id         IS '导入记录id（自增主键），即物理表 _batch_id 系统列的取值';
-COMMENT ON COLUMN upload_batch.upload_id  IS '文件级标识（UUID）：一个文件一个，多 sheet 时多行共享。前端文件列表按此聚合、删除按此唯一定位；orig_name 仅作删除前的二次校验，不做删除条件（中文/空格/全角字符易导致编码不一致而删不掉）';
-COMMENT ON COLUMN upload_batch.table_name IS '数据写入的物理表名，逻辑关联 table_registry.table_name（应用层保证，不建外键）';
-COMMENT ON COLUMN upload_batch.orig_name  IS '原始文件名 + 批次后缀：<原文件名>_v<序号>_<yyyymmdd>.<ext>，如 语文成绩_v2_20261103.xlsx。后缀既让用户区分同名的多次上传，也让模型识别这是同一类文件的第几次';
-COMMENT ON COLUMN upload_batch.sheet_name IS 'sheet 名；单 sheet 文件可为空';
-COMMENT ON COLUMN upload_batch.row_count  IS '本 sheet 导入行数，回答里回显"基于 N 行数据"；按表汇总用 SUM 实时算，不冗余存储';
-COMMENT ON COLUMN upload_batch.status     IS '状态：pending / success / failed。不做软删除标记，删文件直接删行';
-COMMENT ON COLUMN upload_batch.created_at IS '导入时间，回答时回显"基于 X 时间上传的数据"。注意这是上传时间，不是数据自身的时间范围';
-
-CREATE INDEX IF NOT EXISTS idx_upload_batch_table  ON upload_batch (table_name, created_at);
-CREATE INDEX IF NOT EXISTS idx_upload_batch_upload ON upload_batch (upload_id);
 
 
 -- =============================================================================
