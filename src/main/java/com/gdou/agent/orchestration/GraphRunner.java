@@ -44,7 +44,7 @@ public class GraphRunner {
 
     @Autowired
     private MessageService messageService;
-    
+
 
     public GraphReturner run(String question, RunContext ctx) {
         StreamSink sink = ctx.sink();
