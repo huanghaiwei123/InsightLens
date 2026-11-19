@@ -48,13 +48,15 @@ public class PersonalController {
     private UploadBatchService uploadBatchService;
 
     /**
-     * 用户新建会话窗口
-     * @return
+     * 用户新建会话窗口，可指定其绑定的大分类。
+     * @param categoryId 大分类 id；不传则窗口不绑定分类，检索时不按分类过滤
+     * @return 新建窗口的 id
      */
     @GetMapping("/create")
-    public Result create() {
-        log.info("用户正在新建会话窗口，请等候");
+    public Result create(@RequestParam(value = "categoryId", required = false) Integer categoryId) {
+        log.info("用户正在新建会话窗口，categoryId={}", categoryId);
         Session session = Session.builder()
+                .categoryId(categoryId)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
@@ -90,10 +92,12 @@ public class PersonalController {
         session.setUpdatedAt(LocalDateTime.now());
         sessionService.updateById(session);
         SessionHolder.set(session.getId());
+        SessionHolder.setCategory(session.getCategoryId());
         // traceId 由 ChatInterceptor 在请求线程写入，同一请求的节点日志共用它
         String traceId = MDC.get(GraphRunner.TRACE_ID);
         long start = System.currentTimeMillis();
-        log.info("[chat/overAll] >>> 收到请求 traceId={}, userMsg={}", traceId, userMsg);
+        log.info("[chat/overAll] >>> 收到请求 traceId={}, userMsg={}, categoryId={}",
+                traceId, userMsg, session.getCategoryId());
         try {
             RunContext ctx = new RunContext(traceId, new NoOpStreamSink());
             GraphReturner returner = runner.run(userMsg, ctx);
@@ -105,6 +109,9 @@ public class PersonalController {
             log.error("[chat/overAll] 请求失败 traceId={}, cost={}ms, userMsg={}, type={}",
                     traceId, System.currentTimeMillis() - start, userMsg, e.getClass().getSimpleName());
             throw e;
+        } finally {
+            // Tomcat 线程会复用：sessionId 与 categoryId 都要清，否则下一个请求会继承上一个窗口的分类
+            SessionHolder.remove();
         }
     }
 
@@ -122,6 +129,7 @@ public class PersonalController {
         session.setUpdatedAt(LocalDateTime.now());
         sessionService.updateById(session);
         SessionHolder.set(session.getId());
+        SessionHolder.setCategory(session.getCategoryId());
         // MDC 是 ThreadLocal：traceId 是值，mdc 是整份上下文快照，后者供子线程日志复用
         String traceId = MDC.get(GraphRunner.TRACE_ID);
         Map<String, String> mdc = MDC.getCopyOfContextMap();
@@ -151,6 +159,7 @@ public class PersonalController {
 
                 try {
                     SessionHolder.set(session.getId());
+                    SessionHolder.setCategory(session.getCategoryId());
                     RunContext ctx = new RunContext(traceId, sink);
                     GraphReturner returner = runner.run(userMsg, ctx);
                     sink.done(returner.getAnswer(), returner.getQuestionToUser());

@@ -40,4 +40,10 @@ public class Session {
      * 用户会话最后活跃时间（每轮消息后更新，用于会话列表排序）
      */
     private LocalDateTime updatedAt;
+
+    /**
+     * 会话绑定的大分类（逻辑关联 category.id，不建外键）。Agent 检索范围由此限定；
+     * 为空表示未绑定，此时候选表不按分类过滤。
+     */
+    private Integer categoryId;
 }
