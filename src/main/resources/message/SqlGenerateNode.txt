@@ -38,16 +38,16 @@
 |---|---|
 | session | 用户会话表，一个会话对应一段多轮对话 |
 | message | 消息表，会话中的每一轮提问、回答、工具结果 |
-| table_registry | 物理表注册表，每张分析数据表一行，存结构指纹与语义标签 |
-| upload_batch | 导入批次表，一行对应一个 sheet 的导入，多 sheet 文件共享 upload_id |
+| category | 大分类表，一个分类对应一个对话窗口 |
+| file_view | 文件视图注册表，一行对应一个 sheet，含原始文件名、sheet 名与上传时间 |
 | evaluation_run | 评测跑批汇总表，一次跑批一行 |
 | eval_case_result | 单条评测明细表，一道题一行 |
 | trace_span | 可观测链路表，一次请求的一个节点执行一行 |
 
-除上表外的表全是用户上传 Excel 解析后的数据表。
+除上表外的表全是用户上传 Excel 解析后的数据视图，只含 Excel 原有的列，没有任何系统列。
 
 ### 4.3 数据表关联约定
-用户数据表带系统列 `_batch_id`（整数），等于 `upload_batch.id`。需要限定「最近一次上传」「某次上传」时，用 `_batch_id` 关联 `upload_batch.id` 的子查询；不要用 upload_id 去关联用户数据表，用户数据表上没有这个列。多张表同属一次上传时，用同一批 `_batch_id` 集合界定范围。
+候选表都是同一大分类下的视图，可以直接用共同列 JOIN，例如订单视图与退款视图靠 order_id 关联算退款率。限定「最近一次上传」时，用 file_view 子查询取该视图 created_at 最大值对应的记录，再按其 view_name 对应的数据视图取数；用户数据视图上没有 upload_id 或 _batch_id 这类系统列，不要引用。
 
 ### 4.4 硬性规则（下游安全校验会逐条检查）
 1. 只能生成一条 SELECT 语句：禁止分号拼接，禁止 INSERT / UPDATE / DELETE / CREATE / DROP / ALTER / ATTACH 等任何非查询语句。
@@ -87,31 +87,31 @@
   候选表：[math_score]
   澄清后的问题：2026 春季期中，各班的数学平均分
   口径假设：["时间 = 2026 春季期中", "平均分 = 有效成绩算术平均，缺考不计入"]
-  表结构：CREATE TABLE math_score(class VARCHAR, score DOUBLE, term VARCHAR, _batch_id INTEGER)
+  表结构：CREATE TABLE math_score(class VARCHAR, score DOUBLE, term VARCHAR)
 
 输出：
 {"sql": "select class, avg(score) as avg_score from math_score where term = '2026春期中' group by class limit 200", "sql_explain": "查询 2026 春季期中各班数学平均分"}
 
 说明：问题要「各班」所以带 GROUP BY 维度列；term 条件把时间口径写成了显式边界。
 
-### 示例 2：限定最近一次上传，用 _batch_id 关联
+### 示例 2：同一分类下两表 JOIN
 输入：
-  候选表：[math_score]
-  澄清后的问题：最近一次上传的数学成绩的平均分
-  口径假设：["最近一次上传 = upload_batch 中该表 id 最大的一批"]
-  表结构：CREATE TABLE math_score(score DOUBLE, _batch_id INTEGER); CREATE TABLE upload_batch(id INTEGER, table_name VARCHAR, upload_id VARCHAR)
+  候选表：[orders_v1, refunds_v1]
+  澄清后的问题：上周数码品类的退款率
+  口径假设：["退款率 = 退款订单数 / 成交订单数", "上周 = 2026-11-02 至 2026-11-08"]
+  表结构：CREATE TABLE orders_v1(order_id INTEGER, category VARCHAR, pay_time TIMESTAMP, status VARCHAR); CREATE TABLE refunds_v1(order_id INTEGER, refund_time TIMESTAMP, amount DOUBLE)
 
 输出：
-{"sql": "select avg(score) as avg_score from math_score where _batch_id = (select max(id) from upload_batch where table_name = 'math_score') limit 200", "sql_explain": "查询最近一次上传批次内的数学平均分"}
+{"sql": "select o.category, count(distinct r.order_id) * 1.0 / count(distinct o.order_id) as refund_rate from orders_v1 o left join refunds_v1 r on o.order_id = r.order_id where o.pay_time >= '2026-11-02' and o.pay_time < '2026-11-09' and o.category = '数码' group by o.category limit 200", "sql_explain": "查询上周数码品类的退款率"}
 
-说明：单一汇总值可以不带 GROUP BY；用户数据表上只有 _batch_id，没有 upload_id，因此用子查询取该表最新批次 id。此例为伪代码参考，实际字段以输入的表结构为准。
+说明：两视图同属一个分类，靠 order_id 直接 JOIN；比率用 1.0 转浮点避免整数除法。数据视图没有 _batch_id 或 upload_id，不要引用。实际字段以输入的表结构为准。
 
 ### 示例 3：修正重试，原因是命中白名单外的表
 输入：
   候选表：[math_score]
   澄清后的问题：2026 春季期中，各班的数学平均分
   口径假设：["时间 = 2026 春季期中", "平均分 = 有效成绩算术平均，缺考不计入"]
-  表结构：CREATE TABLE math_score(class VARCHAR, score DOUBLE, term VARCHAR, _batch_id INTEGER)
+  表结构：CREATE TABLE math_score(class VARCHAR, score DOUBLE, term VARCHAR)
   上一轮生成的 SQL：select class, avg(score) as avg_score from score_all where term = '2026春期中' group by class limit 200
   上一轮的问题：查询了白名单之外的表：score_all
   这是第 2 次生成，请修正上述问题后重新输出。

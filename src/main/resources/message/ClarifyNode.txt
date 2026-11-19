@@ -36,7 +36,7 @@
 仅在 need_clarify 为 true 时填写，否则必须为 null。内容要求一句话、不超过 30 字、只问缺的那一项、给出可选项，方便用户直接选。不得用字符串「null」「无」「None」代替 JSON 的 null。
 
 ### selected_tables（字符串数组）
-从候选表清单中选出回答这个问题需要用到的表名，表名必须逐字照抄清单里的写法。只按表名与语义标签判断即可，列结构会在下一阶段提供。判断原则是宁可多选、不要漏选：多选只是多带一点表结构，漏选会直接导致查错表。系统表（session、message、table_registry、upload_batch、evaluation_run、eval_case_result、trace_span）默认可用，不在清单里，不要选。清单里没有任何相关表时输出空数组。
+从候选表清单中选出回答这个问题需要用到的表名，表名必须逐字照抄清单里的写法。候选表的表名是后端生成的 ASCII 视图名，语义标签是用户上传时的 sheet 名，两张要联动的表靠语义标签与列名对应判断。只按表名与语义标签判断即可，列结构会在下一阶段提供。判断原则是宁可多选、不要漏选：多选只是多带一点表结构，漏选会直接导致查错表。系统表（session、message、category、file_view、evaluation_run、eval_case_result、trace_span）默认可用，不在清单里，不要选。清单里没有任何相关表时输出空数组。
 
 ## 4. 规则
 
