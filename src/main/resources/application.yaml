@@ -19,6 +19,7 @@ spring:
       maximum-pool-size: 1
       minimum-idle: 1
 
+
   ai:
     openai:
       # api-key / base-url 属于环境相关配置，放在 application-local.yaml，不进版本库
@@ -27,6 +28,9 @@ spring:
           # 与 Codex config.toml 的 model 保持一致：gpt-6-luna（不是 gpt-6.1-luna）
           model: gpt-6-luna
           temperature: 0
+  servlet:
+    multipart:
+      max-file-size: 1KB
 
 mybatis-plus:
   configuration:
@@ -47,3 +51,6 @@ logging:
     root: INFO
     com.gdou: INFO
     # 排障时把 com.gdou 调成 DEBUG，可额外看到模型返回原文、DDL 查询语句与白名单明细
+
+agent:
+  workspace: /user/data/excel

@@ -2,6 +2,9 @@ package com.gdou.agent.api.service;
 
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.gdou.agent.meta.entity.UploadBatch;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
 
 /**
  * @author huanghaiwei
@@ -10,4 +13,5 @@ import com.gdou.agent.meta.entity.UploadBatch;
  */
 public interface UploadBatchService extends IService<UploadBatch> {
 
+    Boolean create(List<MultipartFile> excels);
 }

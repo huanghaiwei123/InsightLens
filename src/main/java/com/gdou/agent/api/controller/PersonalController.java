@@ -5,6 +5,7 @@ import com.gdou.agent.api.constant.CodeConstant;
 import com.gdou.agent.api.constant.MsgConstant;
 import com.gdou.agent.api.holder.SessionHolder;
 import com.gdou.agent.api.service.SessionService;
+import com.gdou.agent.api.service.UploadBatchService;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.infra.stream.SseStreamSink;
 import com.gdou.agent.meta.entity.Session;
@@ -17,8 +18,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
 
@@ -41,18 +44,35 @@ public class PersonalController {
     @Autowired
     private SessionService sessionService;
 
+    @Autowired
+    private UploadBatchService uploadBatchService;
+
     /**
      * 用户新建会话窗口
      * @return
      */
     @GetMapping("/create")
     public Result create() {
+        log.info("用户正在新建会话窗口，请等候");
         Session session = Session.builder()
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
-        sessionService.save(session);
-        return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS, session.getId());
+        boolean save = sessionService.save(session);
+        if(save){
+            log.info("用户新建会话窗口完毕，窗口id为{}", session.getId());
+            return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS, session.getId());
+        }else{
+            log.error("用户新建会话窗口失败，请检查原因");
+            return Result.success(CodeConstant.CALL_ERROR, MsgConstant.CALL_ERROR, null);
+        }
+    }
+
+    @PostMapping("/upload")
+    public Result upload(@RequestParam("excel") List<MultipartFile> excels) {
+        log.info("用户正在上传新的excel文件");
+        Boolean success = uploadBatchService.create(excels);
+        return null;
     }
 
     /**

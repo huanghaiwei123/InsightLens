@@ -3,6 +3,7 @@ package com.gdou.agent.meta.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import lombok.Builder;
 import lombok.Data;
 
 import java.util.Date;
@@ -14,6 +15,7 @@ import java.util.Date;
  */
 @Data
 @TableName(value = "upload_batch")
+@Builder
 public class UploadBatch {
 
     /**
