@@ -1,85 +1,66 @@
 package com.gdou.agent.orchestration.node.impl;
 
-import com.baomidou.mybatisplus.core.MybatisConfiguration;
-import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.gdou.agent.api.service.MessageService;
-import com.gdou.agent.api.service.TableRegistryService;
 import com.gdou.agent.infra.LlmClient;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
-import com.gdou.agent.meta.entity.TableRegistry;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
-import org.apache.ibatis.builder.MapperBuilderAssistant;
-import org.junit.jupiter.api.BeforeAll;
-import org.springframework.test.util.ReflectionTestUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * ① 澄清节点：注册表 → 候选表清单 → 模型选表 → state 的映射。
- * Mapper 与 LlmClient 都是假的，不碰 DuckDB、不调模型。
+ * ① 澄清节点：file_view → 候选表清单 → 模型选表 → state 的映射。
+ * JdbcTemplate 与 LlmClient 都是假的，不碰 DuckDB、不调模型。
  */
 class ClarifyNodeTest {
 
     private static final RunContext CTX = new RunContext("clarify-test", new NoOpStreamSink());
 
     private LlmClient llmClient;
-    private TableRegistryService registryService;
+    private JdbcTemplate jdbc;
     private ClarifyNode node;
     private AnalysisState state;
-
-    /**
-     * clarify 用 LambdaQueryWrapper.select(TableRegistry::getTableName, ...) 拼候选表清单，
-     * 方法引用解析依赖 MyBatis-Plus 的 TableInfo 缓存。平时由 Spring 启动时注册，
-     * 纯单测没有 SqlSessionFactory，这里手动初始化一次，不需要启动容器或连数据库。
-     */
-    @BeforeAll
-    static void initTableInfo() {
-        TableInfoHelper.initTableInfo(
-                new MapperBuilderAssistant(new MybatisConfiguration(), ""),
-                TableRegistry.class);
-    }
 
     @BeforeEach
     void setUp() {
         llmClient = mock(LlmClient.class);
-        registryService = mock(TableRegistryService.class);
+        jdbc = mock(JdbcTemplate.class);
         node = new ClarifyNode();
         // 节点改成 @Autowired 字段注入后纯单测没有 Spring 容器，手动补齐依赖；
         // MessageService 只需一个 mock，落库不是本测试要验的行为。
         ReflectionTestUtils.setField(node, "LlmClient", llmClient);
         ReflectionTestUtils.setField(node, "objectMapper", new ObjectMapper());
-        ReflectionTestUtils.setField(node, "tableRegistryService", registryService);
+        ReflectionTestUtils.setField(node, "jdbc", jdbc);
         ReflectionTestUtils.setField(node, "messageService", mock(MessageService.class));
         state = new AnalysisState();
         state.setQuestion("这次平均分怎么样");
-        doReturn(List.of(registry("math_score", "2026 春季期中数学", "class:int|score:decimal"),
-                registry("chinese_score", "2026 春季期中语文", "class:int|score:decimal")))
-                .when(registryService).list(any(LambdaQueryWrapper.class));
+        // 窗口未绑定分类 → 走不带 category_id 的查询；返回两行模拟 file_view
+        doReturn(List.of(
+                view("math_score", "2026 春季期中数学", "class:INTEGER,score:DOUBLE"),
+                view("chinese_score", "2026 春季期中语文", "class:INTEGER,score:DOUBLE")))
+                .when(jdbc).queryForList(anyString());
     }
 
-    private static TableRegistry registry(String name, String tag, String schemaKey) {
-        TableRegistry t = new TableRegistry();
-        t.setTableName(name);
-        t.setDataTag(tag);
-        t.setSchemaKey(schemaKey);
-        return t;
+    private static Map<String, Object> view(String viewName, String sheetName, String columns) {
+        return Map.of("view_name", viewName, "sheet_name", sheetName, "column_types", columns);
     }
 
     private String userMessage() {
@@ -110,7 +91,7 @@ class ClarifyNodeTest {
     }
 
     @Test
-    @DisplayName("候选表清单按「表名 | 语义标签 | 结构指纹」三列拼进用户消息")
+    @DisplayName("候选表清单按「view_name | sheet_name | 列类型」三列拼进用户消息")
     void tableListFormat() {
         when(llmClient.call(anyList())).thenReturn(
                 "{\"clarified_question\":\"平均分\",\"assumptions\":[],\"need_clarify\":false,"
@@ -120,8 +101,8 @@ class ClarifyNodeTest {
 
         String user = userMessage();
         assertThat(user).contains("候选表清单（表名 | 语义标签 | 结构指纹）")
-                .contains("math_score | 2026 春季期中数学 | class:int|score:decimal")
-                .contains("chinese_score | 2026 春季期中语文 | class:int|score:decimal")
+                .contains("math_score | 2026 春季期中数学 | class:INTEGER,score:DOUBLE")
+                .contains("chinese_score | 2026 春季期中语文 | class:INTEGER,score:DOUBLE")
                 .startsWith("这次平均分怎么样");
     }
 
@@ -153,9 +134,9 @@ class ClarifyNodeTest {
     }
 
     @Test
-    @DisplayName("注册表为空时给出明确占位文案，不让模型对着空清单猜")
+    @DisplayName("file_view 为空时给出明确占位文案，不让模型对着空清单猜")
     void emptyRegistry() {
-        doReturn(List.<TableRegistry>of()).when(registryService).list(any(LambdaQueryWrapper.class));
+        doReturn(List.<Map<String, Object>>of()).when(jdbc).queryForList(anyString());
         when(llmClient.call(anyList())).thenReturn(
                 "{\"clarified_question\":\"平均分\",\"assumptions\":[],\"need_clarify\":true,"
                         + "\"question_to_user\":\"请先上传数据\",\"selected_tables\":[]}");

@@ -137,9 +137,9 @@ class SqlGuardNodeTest {
     }
 
     @Test
-    @DisplayName("⑤ 七张系统表在白名单内")
+    @DisplayName("⑤ 系统元数据表在白名单内")
     void allowSystemTables() {
-        check("select * from table_registry limit 10");
+        check("select * from file_view limit 10");
         assertPass();
     }
 
