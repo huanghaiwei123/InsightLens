@@ -1,17 +1,11 @@
 package com.gdou.agent.orchestration.node.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gdou.agent.api.holder.SessionHolder;
-import com.gdou.agent.api.mapper.TableRegistryMapper;
 import com.gdou.agent.api.service.MessageService;
-import com.gdou.agent.api.service.TableRegistryService;
-import com.gdou.agent.api.service.TraceSpanService;
 import com.gdou.agent.infra.LlmClient;
-import com.gdou.agent.meta.entity.TableRegistry;
-import com.gdou.agent.meta.entity.TraceSpan;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
 import com.gdou.agent.orchestration.node.Node;
@@ -23,19 +17,17 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 意图澄清状态节点执行
@@ -48,7 +40,7 @@ public class ClarifyNode implements Node {
     @Autowired
     private ObjectMapper objectMapper;
     @Autowired
-    private TableRegistryService tableRegistryService;
+    private JdbcTemplate jdbc;
     @Autowired
     private MessageService messageService;
 
@@ -64,12 +56,13 @@ public class ClarifyNode implements Node {
                 + "并写进 clarified_question 与 assumptions 两处。";
         buildMessage(systemMessage, "system");
         String tables = tableList();
-        // 标题与 ClarifyNode.txt 的「1. 输入」逐字对齐，第三列是结构指纹不是列定义
+        // 标题与 ClarifyNode.txt 的「1. 输入」逐字对齐，第三列是列类型摘要不是列定义
         String userMessage = question + "\n\n候选表清单（表名 | 语义标签 | 结构指纹）：\n" + tables;
         List<Message> messages = List.of(
                 new SystemMessage(systemMessage),
                 new UserMessage(userMessage));
-        log.info("[clarify] >>> baseDate={}, question={}, 候选表行数={}", baseDate, question, tables.lines().count());
+        log.info("[clarify] >>> baseDate={}, question={}, categoryId={}, 候选表行数={}",
+                baseDate, question, SessionHolder.getCategory(), tables.lines().count());
 
         String raw = LlmClient.call(messages);
         log.debug("[clarify] 模型返回原文：{}", raw);
@@ -86,23 +79,27 @@ public class ClarifyNode implements Node {
     }
 
     /**
-     * 从注册表拼候选表清单，一行一张表：表名 | 语义标签 | 结构指纹。
-     * 结构指纹（schema_key）本身就携带列名与类型族，模型选表只看表名和标签即可，
-     * 不需要读完整 DDL——DDL 留给 schema_retrieve 只取选中的表。
+     * 从 file_view 拼候选表清单，一行一张视图：view_name | sheet_name | 列类型摘要。
+     * 按本窗口绑定的 category_id 过滤实现大分类隔离；categoryId 为空时不加过滤（窗口未绑定分类）。
+     * column_types 在建 VIEW 时固化，既是列类型摘要也是选表的语义线索。
      */
     private String tableList() {
-        LambdaQueryWrapper<TableRegistry> wrapper = new LambdaQueryWrapper<>();
-        wrapper.select(TableRegistry::getTableName, TableRegistry::getDataTag, TableRegistry::getSchemaKey);
-        List<TableRegistry> tables = tableRegistryService.list(wrapper);
-        if (tables.isEmpty()) {
-            log.warn("[clarify] table_registry 为空，候选表清单无表可选");
+        Integer categoryId = SessionHolder.getCategory();
+        String base = "select view_name, sheet_name, column_types from file_view"
+                + " where status = 'success'";
+        List<Map<String, Object>> rows = categoryId == null
+                ? jdbc.queryForList(base + " order by view_name")
+                : jdbc.queryForList(base + " and category_id = ? order by view_name", categoryId);
+        if (rows.isEmpty()) {
+            log.warn("[clarify] file_view 无可用视图 categoryId={}，候选表清单无表可选", categoryId);
             return "（库中暂无任何数据表）";
         }
         StringBuilder sb = new StringBuilder();
-        for (TableRegistry t : tables) {
-            sb.append(t.getTableName())
-                    .append(" | ").append(t.getDataTag() == null ? "（无标签）" : t.getDataTag())
-                    .append(" | ").append(t.getSchemaKey() == null ? "" : t.getSchemaKey())
+        for (Map<String, Object> row : rows) {
+            Object columnTypes = row.get("column_types");
+            sb.append(row.get("view_name"))
+                    .append(" | ").append(row.get("sheet_name"))
+                    .append(" | ").append(columnTypes == null ? "" : columnTypes)
                     .append('\n');
         }
         return sb.toString();

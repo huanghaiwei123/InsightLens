@@ -38,9 +38,9 @@ import java.util.regex.Pattern;
 @Service(NodeName.SQL_GUARD)
 public class SqlGuardNode implements Node {
 
-    /** 系统表：提示词约定模型可查这 7 张元数据表，与候选表共同构成白名单 */
+    /** 系统表：提示词约定模型可查这些元数据表，与候选表共同构成白名单 */
     private static final Set<String> SYSTEM_TABLES = Set.of(
-            "session", "message", "table_registry", "upload_batch",
+            "session", "message", "category", "file_view",
             "evaluation_run", "eval_case_result", "trace_span");
 
     /** 危险关键词：出现在语句任意位置（含 CTE 内部）即拒绝 */
