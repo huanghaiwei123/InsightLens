@@ -3,10 +3,9 @@ package com.gdou.agent.api.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.gdou.agent.api.excelTool.ExcelDataListener;
+import com.gdou.agent.api.tools.ExcelDataListener;
 import com.gdou.agent.api.service.CategoryService;
 import com.gdou.agent.api.service.FileViewService;
-import com.gdou.agent.api.service.MessageService;
 import com.gdou.agent.api.service.UploadService;
 import com.gdou.agent.api.tools.FileTool;
 import com.gdou.agent.api.tools.FileTransfer;
@@ -37,6 +36,7 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 @Slf4j
@@ -87,7 +87,7 @@ public class UploadServiceImpl implements UploadService {
             }
         });
         List<Message> messages = List.of(
-                new SystemMessage(prompt("message/UploadMessage")),
+                new SystemMessage(prompt("message/UploadMessage.txt")),
                 new UserMessage(
                         "用户上传的文件的信息是" + allFile
                                 +"|"+"临时目录相对于工作目录的地址是"+Path.of(workSpace).relativize(temp)
@@ -111,9 +111,9 @@ public class UploadServiceImpl implements UploadService {
         int count = 0;
         for (MultipartFile file : excels) {
             count++;
-            var singleFile = new LinkedHashMap<String,List<Map<Integer, String>>>();
+            var singleFile = new LinkedHashMap<String,List<Map<String, String>>>();
             String fileName = file.getOriginalFilename();
-            ExcelDataListener listener = new ExcelDataListener();
+            ExcelDataListener listener = new ExcelDataListener(fileViewService, UUID.randomUUID().toString().substring(0,8));
             try(InputStream in = file.getInputStream();
                 ExcelReader reader = FesodSheet.read(in).build()){
                 List<ReadSheet> sheets = reader.excelExecutor().sheetList();
@@ -121,7 +121,7 @@ public class UploadServiceImpl implements UploadService {
                 List<String> sheetName = sheets.stream().map(ReadSheet::getSheetName).toList();
                 for (String name : sheetName) {
                     FesodSheet.read(in,listener).sheet(name).doRead();
-                    List<Map<Integer, String>> data = listener.getData();
+                    List<Map<String, String>> data = listener.getData();
                     listener.removeData();
                     singleFile.put(name,data);
                 }
