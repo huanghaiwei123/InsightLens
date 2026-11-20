@@ -5,7 +5,7 @@ import com.gdou.agent.api.constant.CodeConstant;
 import com.gdou.agent.api.constant.MsgConstant;
 import com.gdou.agent.api.holder.SessionHolder;
 import com.gdou.agent.api.service.SessionService;
-import com.gdou.agent.api.service.UploadBatchService;
+import com.gdou.agent.api.service.UploadService;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.infra.stream.SseStreamSink;
 import com.gdou.agent.meta.entity.Session;
@@ -45,7 +45,7 @@ public class PersonalController {
     private SessionService sessionService;
 
     @Autowired
-    private UploadBatchService uploadBatchService;
+    private UploadService uploadService;
 
     /**
      * 用户新建会话窗口，可指定其绑定的大分类。
@@ -70,11 +70,17 @@ public class PersonalController {
         }
     }
 
+    /**
+     * Excel 上传入口。原导入批次管道（UploadBatchService）已随 upload_batch 表废弃，
+     * 新管道尚未实现，此处保留接口契约，明确返回"未实现"而非 null。
+     * 后续接入 file_view 直读方案时在此落 落盘 → 解析 sheet → 写 file_view 元数据。
+     */
     @PostMapping("/upload")
     public Result upload(@RequestParam("excel") List<MultipartFile> excels) {
-        log.info("用户正在上传新的excel文件");
-        Boolean success = uploadBatchService.create(excels);
-        return null;
+        log.warn("用户正在上传{}个文件，正在处理", excels.size());
+        uploadService.upload(excels);
+        return Result.success(CodeConstant.CALL_ERROR, MsgConstant.CALL_ERROR,
+                "Excel 上传管道尚未实现，请稍后再试");
     }
 
     /**
