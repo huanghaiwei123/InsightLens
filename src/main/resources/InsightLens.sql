@@ -3,7 +3,7 @@
 -- =============================================================================
 -- 用途：存"应用自己产生的数据"——会话、上传批次、评测结果、Trace。
 --       不存任何业务明细（业务明细在分析数据源的 .duckdb 文件里）。
--- 引擎：DuckDB 单文件（建议 data/meta.duckdb）
+-- 引擎：DuckDB 单文件（实际库：data/app.duckdb）
 -- 配套：data-architecture.md §2.1（表清单，字段与本文件严格一一对应）
 --
 -- 字段来源：按设计表（data-architecture.md §2.1）逐字段落地，共 6 张表。
@@ -52,18 +52,17 @@ CREATE TABLE IF NOT EXISTS file_view(
     orig_name    VARCHAR NOT NULL,       -- 原始文件名（含版本+日期后缀），前端报表展示
     file_path    VARCHAR NOT NULL,       -- 相对 agent.workspace 的路径，如 <uuid>/<name>.xlsx
     sheet_name   VARCHAR NOT NULL,       -- Excel 内的工作表名，可中文，仅展示与映射
-    view_name    VARCHAR NOT NULL UNIQUE,-- DuckDB 视图名，模型看到的"表名"，ASCII snake_case
-    column_types JSON,                   -- 列名+类型，建 VIEW 时 read_xlsx(types=...) 用
+    column_types JSON,                   -- 列名+类型，直读时 read_xlsx(types=...) 用
     row_count    BIGINT,                 -- 本 sheet 行数，回答回显"基于 N 行"
     status       VARCHAR NOT NULL,       -- success / failed
     created_at   TIMESTAMP NOT NULL      -- 上传时间，前端报表的时间轴
     );
-COMMENT ON TABLE file_view IS '文件/视图注册表：一行=一个sheet=一个VIEW；数据行不入库，文件是唯一数据源';
+COMMENT ON TABLE file_view IS '文件注册表：一行=一个sheet；文件是唯一数据源，数据行不入库';
 COMMENT ON COLUMN file_view.category_id  IS '所属大分类，逻辑关联 category.id；三节点按此过滤实现隔离';
 COMMENT ON COLUMN file_view.upload_id    IS '文件级UUID，删除与文件列表聚合按此定位；orig_name 仅展示不做删除条件';
-COMMENT ON COLUMN file_view.view_name    IS 'DuckDB视图名，模型SQL里写的表名；必须ASCII snake_case，禁中文标识符';
-COMMENT ON COLUMN file_view.sheet_name   IS 'Excel原sheet名；用户口语里说"订单明细"时靠它映射到 view_name';
-COMMENT ON COLUMN file_view.column_types IS '列类型固化的JSON，建VIEW时传给read_xlsx(types=)，避免每次重推断导致评测漂移';
+COMMENT ON COLUMN file_view.file_path    IS '相对 agent.workspace 的文件路径，直读 read_xlsx 用；模型SQL里的表名来源';
+COMMENT ON COLUMN file_view.sheet_name   IS 'Excel原sheet名；用户口语里说"订单明细"时靠它定位到本行';
+COMMENT ON COLUMN file_view.column_types IS '列类型固化的JSON，直读read_xlsx(types=)用，避免每次重推断导致评测漂移';
 COMMENT ON COLUMN file_view.status       IS 'success / failed；单个sheet解析失败不影响同文件其他sheet';
 
 CREATE INDEX IF NOT EXISTS idx_file_view_category ON file_view (category_id, created_at);
@@ -79,6 +78,9 @@ CREATE TABLE IF NOT EXISTS session(
     created_at  TIMESTAMP NOT NULL,
     updated_at  TIMESTAMP NOT NULL
     );
+-- 旧库升级：session 表可能早于 category_id 列就已建好，IF NOT EXISTS 建表会跳过、不会补列。
+-- 必须先补列再 COMMENT ON，否则老库上注释语句会因列不存在而报错。
+ALTER TABLE session ADD COLUMN IF NOT EXISTS category_id INTEGER;
 COMMENT ON TABLE  session            IS '用户会话表：一个会话 = 一段多轮对话';
 COMMENT ON COLUMN session.id         IS '用户会话id（自增主键）';
 COMMENT ON COLUMN session.title      IS '用户会话标题（默认取首条提问前 30 字，可重命名）';
