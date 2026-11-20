@@ -29,11 +29,6 @@ public class Category {
     private String name;
 
     /**
-     * 分类描述
-     */
-    private String description;
-
-    /**
      * 创建时间
      */
     private LocalDateTime createdAt;

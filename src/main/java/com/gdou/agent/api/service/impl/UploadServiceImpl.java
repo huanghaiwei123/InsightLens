@@ -1,14 +1,19 @@
 package com.gdou.agent.api.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gdou.agent.api.excelTool.ExcelDataListener;
+import com.gdou.agent.api.service.CategoryService;
+import com.gdou.agent.api.service.FileViewService;
+import com.gdou.agent.api.service.MessageService;
 import com.gdou.agent.api.service.UploadService;
 import com.gdou.agent.api.tools.FileTool;
 import com.gdou.agent.api.tools.FileTransfer;
 import com.gdou.agent.api.tools.FolderTool;
 import com.gdou.agent.infra.LlmClient;
 import com.gdou.agent.api.tools.FileAction;
+import com.gdou.agent.meta.entity.Category;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fesod.sheet.ExcelReader;
@@ -28,6 +33,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +52,12 @@ public class UploadServiceImpl implements UploadService {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private CategoryService  categoryService;
+
+    @Autowired
+    private FileViewService fileViewService;
 
     @Value("${agent.workspace}")
     private String workSpace;
@@ -132,13 +144,30 @@ public class UploadServiceImpl implements UploadService {
             FileAction action = objectMapper.readValue(answer, FileAction.class);
             List<FileTransfer> transfers = action.transfers();
             if (action.create()!=null) {
-                folderTool.createFolder(action.create());
+                for(String folder : action.create()){
+                    folderTool.createFolder(folder);
+                }
             } else if (action.delete()!=null) {
-                folderTool.deleteFolder(action.delete());
+                for(String folder : action.delete()){
+                    folderTool.deleteFolder(folder);
+                }
             }
             for (FileTransfer transfer : transfers) {
                 if(transfer.from()!=null && transfer.to()!=null && transfer.fileName()!=null) {
                     fileTool.transfer(transfer.from()+"/"+transfer.fileName(), transfer.to());
+                }
+                if(transfer.to()!=null) {
+                    String category = transfer.to().split("/")[0];
+                    LambdaQueryWrapper<Category> cateWrapper = new LambdaQueryWrapper<>();
+                    cateWrapper.eq(Category::getName,category);
+                    long count = categoryService.count(cateWrapper);
+                    if(count==0) {
+                        Category cat = Category.builder()
+                                .name(category)
+                                .createdAt(LocalDateTime.now())
+                                .build();
+                        categoryService.save(cat);
+                    }
                 }
             }
         } catch (JsonProcessingException e) {

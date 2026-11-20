@@ -36,7 +36,6 @@ CREATE SEQUENCE IF NOT EXISTS seq_category_id START 1;
 CREATE TABLE IF NOT EXISTS category(
                                        id          INTEGER PRIMARY KEY DEFAULT nextval('seq_category_id'),
     name        VARCHAR NOT NULL UNIQUE,   -- 分类名 = workspace 下的文件夹名，如 电商运营
-    description VARCHAR,
     created_at  TIMESTAMP NOT NULL
     );
 COMMENT ON TABLE  category         IS '大分类：隔离单元，一个分类 = 一个文件夹 = 一个对话窗口';
