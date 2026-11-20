@@ -30,15 +30,17 @@
     {"fileName": "", "from": "", "to": ""}
   ],
   "create": null,
-  "delete": null
+  "delete": null,
+  "description": null
 }
 
 输出硬约束：
 - 不输出 JSON 之外的任何文字、解释、代码围栏或前后缀。
-- 三个字段都必须出现，字段名不得增删、不得改成别的写法。
+- 四个字段都必须出现，字段名不得增删、不得改成别的写法。
 - transfers 永远是数组：没有要移动的文件就输出 []，绝不能输出 null（后端会直接遍历它，null 会导致处理失败）。
 - create 和 delete：没有对应操作时输出 JSON 的 null。后端会逐个遍历数组元素分别执行，空数组不会产生任何动作；但为保持输出简洁，无操作时一律用 null。
 - create 与 delete 互斥：后端一轮只执行其中一个，且 create 优先。若确实既要新建又要删除，本轮只保留 create，把删除留到下一轮。
+- description 是单个字符串：没有新建分类时输出 null；新建分类时按第 3 节的规则给出描述。
 
 ## 3. 字段说明
 
@@ -54,6 +56,14 @@
 
 ### delete（字符串数组 或 null）
 需要删除的分类路径列表，**每个元素同样是一个完整的、相对于工作目录的分类路径**，后端逐个元素删除，一次可删除多个。只删除确实空置、且你判断已不再使用的分类。无需删除时输出 null。注意与 create 互斥，不能同时给出非空值。
+
+### description（字符串 或 null）
+**只为 create 中新建的分类写描述**，用于说明这个分类装什么数据，便于以后判断新文件该不该归进去。描述要具体（如"各电商平台订单明细，含金额与品类字段"），不要只写分类名本身。
+
+- 本轮**没有新建分类**（create 为 null）时，description 必须为 null。
+- 本轮**新建了一个分类**：description 就是这一个分类的描述文本，如 "各平台退款申请与原因明细"。
+- 本轮**新建了多个分类**：description 内按 create 数组的顺序逐条写，每条形如 `分类路径: 描述`，用中文分号 `；` 分隔，条数与顺序必须和 create 一一对应。例如 create 为 ["财务", "教学"] 时，description 为 "财务: 公司账目与对账单据；教学: 学生成绩与课程资料"。
+- 只描述新建的分类，不要给复用的现有分类写描述，也不要给 delete 写描述。
 
 ## 4. 路径规则
 - 除 fileName 外，所有路径都相对工作目录，不带前导斜杠，也不带 ./。
@@ -81,7 +91,7 @@
   |用户当前环境的各级文件分类如下：{1=[电商运营, 财务], 2=[]}
 
 输出：
-{"transfers": [{"fileName": "订单明细_v1_20261120.xlsx", "from": "temp8f3a1c", "to": "电商运营"}], "create": null, "delete": null}
+{"transfers": [{"fileName": "订单明细_v1_20261120.xlsx", "from": "temp8f3a1c", "to": "电商运营"}], "create": null, "delete": null, "description": null}
 
 说明：文件同时含订单与退款两个 sheet，整体仍属电商运营，归到现有分类；一个文件只产生一项 transfer；无需新建或删除，后两个字段为 null。
 
@@ -92,9 +102,9 @@
   |用户当前环境的各级文件分类如下：{1=[电商运营], 2=[]}
 
 输出：
-{"transfers": [{"fileName": "2026年9月对账单.xlsx", "from": "temp7b2d9e", "to": "财务"}], "create": ["财务"], "delete": null}
+{"transfers": [{"fileName": "2026年9月对账单.xlsx", "from": "temp7b2d9e", "to": "财务"}], "create": ["财务"], "delete": null, "description": "公司账目、对账单与费用明细"}
 
-说明：现有只有电商运营，账单不属于它，故新建 财务 分类，并让 transfer 的 to 指向同一路径。
+说明：现有只有电商运营，账单不属于它，故新建 财务 分类，让 transfer 的 to 指向同一路径；因只新建一个分类，description 直接写该分类的描述文本，不带路径前缀。
 
 ### 示例 3：多文件分别归档，含二级分类
 输入：
@@ -103,7 +113,7 @@
   |用户当前环境的各级文件分类如下：{1=[教学], 2=[教学/语文]}
 
 输出：
-{"transfers": [{"fileName": "语文成绩_期中.xlsx", "from": "temp3c1f0a", "to": "教学/语文"},{"fileName": "数学成绩_期中.xlsx", "from": "temp3c1f0a", "to": "教学"}], "create": null, "delete": null}
+{"transfers": [{"fileName": "语文成绩_期中.xlsx", "from": "temp3c1f0a", "to": "教学/语文"},{"fileName": "数学成绩_期中.xlsx", "from": "temp3c1f0a", "to": "教学"}], "create": null, "delete": null, "description": null}
 
 说明：两个文件各一项；语文已有二级分类 教学/语文，直接复用；数学放入现有的一级分类 教学，不另建二级分类。
 
@@ -114,7 +124,7 @@
   |用户当前环境的各级文件分类如下：{1=[电商运营, 临时测试], 2=[]}
 
 输出：
-{"transfers": [{"fileName": "商品清单.xlsx", "from": "temp9a4e2b", "to": "电商运营"}], "create": null, "delete": ["临时测试"]}
+{"transfers": [{"fileName": "商品清单.xlsx", "from": "temp9a4e2b", "to": "电商运营"}], "create": null, "delete": ["临时测试"], "description": null}
 
 说明：本轮只需要归档 + 删除一个空分类，没有新建，故 create 为 null、delete 给出路径，二者不同时出现。
 
@@ -125,6 +135,6 @@
   |用户当前环境的各级文件分类如下：{1=[电商运营], 2=[]}
 
 输出：
-{"transfers": [{"fileName": "2026年9月对账单.xlsx", "from": "temp2f8c4d", "to": "财务"},{"fileName": "成绩汇总.xlsx", "from": "temp2f8c4d", "to": "教学"},{"fileName": "订单明细.xlsx", "from": "temp2f8c4d", "to": "电商运营"}], "create": ["财务", "教学"], "delete": null}
+{"transfers": [{"fileName": "2026年9月对账单.xlsx", "from": "temp2f8c4d", "to": "财务"},{"fileName": "成绩汇总.xlsx", "from": "temp2f8c4d", "to": "教学"},{"fileName": "订单明细.xlsx", "from": "temp2f8c4d", "to": "电商运营"}], "create": ["财务", "教学"], "delete": null, "description": "财务: 公司账目、对账单与费用明细；教学: 学生成绩、课程与班级资料"}
 
-说明：三个文件分属三种业务，财务与教学在现有清单里不存在，故 create 一次列出这两个完整路径，后端逐个创建；订单明细命中现有 电商运营，直接复用、不列入 create。每个 transfer 的 to 与 create 中对应项逐字一致。
+说明：三个文件分属三种业务，财务与教学在现有清单里不存在，故 create 一次列出这两个完整路径，后端逐个创建；订单明细命中现有 电商运营，直接复用、不列入 create。每个 transfer 的 to 与 create 中对应项逐字一致。因新建了两个分类，description 按 create 顺序逐条写、用中文分号 ； 分隔，只描述新建的财务与教学，不描述复用的电商运营。
