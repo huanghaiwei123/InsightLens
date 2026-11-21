@@ -5,7 +5,7 @@ import com.gdou.agent.meta.entity.FileView;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fesod.sheet.context.AnalysisContext;
 import org.apache.fesod.sheet.event.AnalysisEventListener;
-
+import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -51,14 +51,16 @@ public class ExcelDataListener extends AnalysisEventListener<Map<Integer,String>
         String fileName = ctx.readWorkbookHolder().getFile().getName();
         String filePath = ctx.readWorkbookHolder().getFile().getPath();
         String sheetName = ctx.readSheetHolder().getReadSheet().getSheetName();
-        FileView.builder()
+        FileView view = FileView.builder()
                 .uploadId(uuid)
                 .origName(fileName)
                 .sheetName(sheetName)
                 .filePath(filePath)
                 .rowCount((long) data.size())
+                .status("success")
+                .createdAt(LocalDateTime.now())
                 .build();
-
+        fileViewService.save(view);
         log.info("当前文件{}的sheet{}数据读取完成",fileName,sheetName);
     }
 

@@ -1,6 +1,7 @@
 package com.gdou.agent.api.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gdou.agent.api.tools.ExcelDataListener;
@@ -13,6 +14,7 @@ import com.gdou.agent.api.tools.FolderTool;
 import com.gdou.agent.infra.LlmClient;
 import com.gdou.agent.api.tools.FileAction;
 import com.gdou.agent.meta.entity.Category;
+import com.gdou.agent.meta.entity.FileView;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fesod.sheet.ExcelReader;
@@ -78,7 +80,6 @@ public class UploadServiceImpl implements UploadService {
     @Override
     public void upload(List<MultipartFile> excels) {
         log.info("正在为您拼命解析用户上传的文件");
-        Map<String,Object> allFile = analysisExcels(excels);
         excels.forEach(s-> {
             try {
                 Files.copy(s.getInputStream(),temp, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
@@ -86,6 +87,7 @@ public class UploadServiceImpl implements UploadService {
                 throw new RuntimeException(e);
             }
         });
+        Map<String,Object> allFile = analysisExcels(excels);
         List<Message> messages = List.of(
                 new SystemMessage(prompt("message/UploadMessage.txt")),
                 new UserMessage(
@@ -157,17 +159,21 @@ public class UploadServiceImpl implements UploadService {
                     fileTool.transfer(transfer.from()+"/"+transfer.fileName(), transfer.to());
                 }
                 if(transfer.to()!=null) {
-                    String category = transfer.to().split("/")[0];
+                    String largeCategory = transfer.to().split("/")[0];
                     LambdaQueryWrapper<Category> cateWrapper = new LambdaQueryWrapper<>();
-                    cateWrapper.eq(Category::getName,category);
-                    long count = categoryService.count(cateWrapper);
-                    if(count==0) {
-                        Category cat = Category.builder()
-                                .name(category)
+                    cateWrapper.eq(Category::getName,largeCategory);
+                    Category category = categoryService.getOne(cateWrapper);
+                    if(category==null ) {
+                        category = Category.builder()
+                                .name(largeCategory)
                                 .createdAt(LocalDateTime.now())
                                 .build();
-                        categoryService.save(cat);
+                        categoryService.save(category);
                     }
+                    Integer categoryId = category.getId();
+                    LambdaUpdateWrapper<FileView> viewWrapper = new LambdaUpdateWrapper<>();
+                    viewWrapper.eq(FileView::getOrigName,transfer.fileName()).set(FileView::getCategoryId,categoryId);
+                    fileViewService.update(viewWrapper);
                 }
             }
         } catch (JsonProcessingException e) {
