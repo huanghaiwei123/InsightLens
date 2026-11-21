@@ -42,7 +42,7 @@ public class FolderTool {
     }
 
 
-    public String createFolder( String... paths){
+    public String createFolder(String paths){
         log.info("正在创建当前用户环境目录下的分类文件夹");
         Path root = Path.of(workSpace,paths);
         try {
@@ -55,17 +55,14 @@ public class FolderTool {
     }
 
 
-    public String deleteFolder( String... path){
+    public String deleteFolder(String paths){
         log.info("正在删除当前用户环境目录下的分类文件夹");
-        for(String p : path){
-            Path dirt = Path.of(p);
-            try {
-                Files.delete(dirt);
-            } catch (IOException e) {
-                String category = p.substring(p.lastIndexOf("/"));
-                log.error("分类文件夹{}删除失败{}",p,e.getMessage());
-                throw new RuntimeException(e);
-            }
+        Path dirt = Path.of(workSpace,paths);
+        try {
+            Files.delete(dirt);
+        } catch (IOException e) {
+            log.error("分类文件夹{}删除失败{}",paths,e.getMessage());
+            throw new RuntimeException(e);
         }
         return  "指定分类删除完成";
     }
