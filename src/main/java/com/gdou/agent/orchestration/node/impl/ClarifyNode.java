@@ -56,8 +56,8 @@ public class ClarifyNode implements Node {
                 + "并写进 clarified_question 与 assumptions 两处。";
         buildMessage(systemMessage, "system");
         String tables = tableList();
-        // 标题与 ClarifyNode.txt 的「1. 输入」逐字对齐，第三列是列类型摘要不是列定义
-        String userMessage = question + "\n\n候选表清单（表名 | 语义标签 | 结构指纹）：\n" + tables;
+        // 标题与 ClarifyNode.txt 的「1. 输入」逐字对齐，第三列是行数不是列定义
+        String userMessage = question + "\n\n候选表清单（文件名 | sheet 名 | 行数）：\n" + tables;
         List<Message> messages = List.of(
                 new SystemMessage(systemMessage),
                 new UserMessage(userMessage));
@@ -79,27 +79,26 @@ public class ClarifyNode implements Node {
     }
 
     /**
-     * 从 file_view 拼候选表清单，一行一张视图：view_name | sheet_name | 列类型摘要。
+     * 从 file_view 拼候选表清单，一行一个 sheet：orig_name | sheet_name | row_count。
      * 按本窗口绑定的 category_id 过滤实现大分类隔离；categoryId 为空时不加过滤（窗口未绑定分类）。
-     * column_types 在建 VIEW 时固化，既是列类型摘要也是选表的语义线索。
+     * 这里只做候选呈现，真实视图名由 schema_retrieve 阶段从 file_view 取；建 VIEW 由上传链路负责。
      */
     private String tableList() {
         Integer categoryId = SessionHolder.getCategory();
-        String base = "select view_name, sheet_name, column_types from file_view"
+        String base = "select orig_name, sheet_name, row_count from file_view"
                 + " where status = 'success'";
         List<Map<String, Object>> rows = categoryId == null
-                ? jdbc.queryForList(base + " order by view_name")
-                : jdbc.queryForList(base + " and category_id = ? order by view_name", categoryId);
+                ? jdbc.queryForList(base + " order by orig_name")
+                : jdbc.queryForList(base + " and category_id = ? order by orig_name", categoryId);
         if (rows.isEmpty()) {
-            log.warn("[clarify] file_view 无可用视图 categoryId={}，候选表清单无表可选", categoryId);
+            log.warn("[clarify] file_view 无可用记录 categoryId={}，候选表清单无表可选", categoryId);
             return "（库中暂无任何数据表）";
         }
         StringBuilder sb = new StringBuilder();
         for (Map<String, Object> row : rows) {
-            Object columnTypes = row.get("column_types");
-            sb.append(row.get("view_name"))
+            sb.append(row.get("orig_name"))
                     .append(" | ").append(row.get("sheet_name"))
-                    .append(" | ").append(columnTypes == null ? "" : columnTypes)
+                    .append(" | ").append(row.get("row_count"))
                     .append('\n');
         }
         return sb.toString();

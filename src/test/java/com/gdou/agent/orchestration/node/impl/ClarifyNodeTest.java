@@ -54,13 +54,13 @@ class ClarifyNodeTest {
         state.setQuestion("这次平均分怎么样");
         // 窗口未绑定分类 → 走不带 category_id 的查询；返回两行模拟 file_view
         doReturn(List.of(
-                view("math_score", "2026 春季期中数学", "class:INTEGER,score:DOUBLE"),
-                view("chinese_score", "2026 春季期中语文", "class:INTEGER,score:DOUBLE")))
+                view("成绩汇总_2026.xlsx", "春季期中数学", 42L),
+                view("成绩汇总_2026.xlsx", "春季期中语文", 42L)))
                 .when(jdbc).queryForList(anyString());
     }
 
-    private static Map<String, Object> view(String viewName, String sheetName, String columns) {
-        return Map.of("view_name", viewName, "sheet_name", sheetName, "column_types", columns);
+    private static Map<String, Object> view(String origName, String sheetName, Long rowCount) {
+        return Map.of("orig_name", origName, "sheet_name", sheetName, "row_count", rowCount);
     }
 
     private String userMessage() {
@@ -77,7 +77,7 @@ class ClarifyNodeTest {
                 好的，我理解了：
                 ```json
                 {"clarified_question": "2026 春季期中的平均分", "assumptions": ["按班级平均"],
-                 "need_clarify": false, "question_to_user": null, "selected_tables": ["math_score"]}
+                 "need_clarify": false, "question_to_user": null, "selected_tables": ["成绩汇总_2026.xlsx"]}
                 ```
                 """);
 
@@ -87,22 +87,22 @@ class ClarifyNodeTest {
         assertThat(state.getAssumptions()).containsExactly("按班级平均");
         assertThat(state.getNeedClarify()).isFalse();
         assertThat(state.getQuestionToUser()).isNull();
-        assertThat(state.getCandidateTables()).containsExactly("math_score");
+        assertThat(state.getCandidateTables()).containsExactly("成绩汇总_2026.xlsx");
     }
 
     @Test
-    @DisplayName("候选表清单按「view_name | sheet_name | 列类型」三列拼进用户消息")
+    @DisplayName("候选表清单按「原始文件名 | sheet 名 | 行数」三列拼进用户消息")
     void tableListFormat() {
         when(llmClient.call(anyList())).thenReturn(
                 "{\"clarified_question\":\"平均分\",\"assumptions\":[],\"need_clarify\":false,"
-                        + "\"question_to_user\":null,\"selected_tables\":[\"math_score\"]}");
+                        + "\"question_to_user\":null,\"selected_tables\":[\"成绩汇总_2026.xlsx\"]}");
 
         node.apply(state, CTX);
 
         String user = userMessage();
-        assertThat(user).contains("候选表清单（表名 | 语义标签 | 结构指纹）")
-                .contains("math_score | 2026 春季期中数学 | class:INTEGER,score:DOUBLE")
-                .contains("chinese_score | 2026 春季期中语文 | class:INTEGER,score:DOUBLE")
+        assertThat(user).contains("候选表清单（文件名 | sheet 名 | 行数）")
+                .contains("成绩汇总_2026.xlsx | 春季期中数学 | 42")
+                .contains("成绩汇总_2026.xlsx | 春季期中语文 | 42")
                 .startsWith("这次平均分怎么样");
     }
 
