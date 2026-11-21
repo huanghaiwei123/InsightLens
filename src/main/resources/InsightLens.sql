@@ -51,7 +51,6 @@ CREATE TABLE IF NOT EXISTS file_view(
     orig_name    VARCHAR NOT NULL,       -- 原始文件名（含版本+日期后缀），前端报表展示
     file_path    VARCHAR NOT NULL,       -- 相对 agent.workspace 的路径，如 <uuid>/<name>.xlsx
     sheet_name   VARCHAR NOT NULL,       -- Excel 内的工作表名，可中文，仅展示与映射
-    column_types JSON,                   -- 列名+类型，直读时 read_xlsx(types=...) 用
     row_count    BIGINT,                 -- 本 sheet 行数，回答回显"基于 N 行"
     status       VARCHAR NOT NULL,       -- success / failed
     created_at   TIMESTAMP NOT NULL      -- 上传时间，前端报表的时间轴
@@ -61,7 +60,6 @@ COMMENT ON COLUMN file_view.category_id  IS '所属大分类，逻辑关联 cate
 COMMENT ON COLUMN file_view.upload_id    IS '文件级UUID，删除与文件列表聚合按此定位；orig_name 仅展示不做删除条件';
 COMMENT ON COLUMN file_view.file_path    IS '相对 agent.workspace 的文件路径，直读 read_xlsx 用；模型SQL里的表名来源';
 COMMENT ON COLUMN file_view.sheet_name   IS 'Excel原sheet名；用户口语里说"订单明细"时靠它定位到本行';
-COMMENT ON COLUMN file_view.column_types IS '列类型固化的JSON，直读read_xlsx(types=)用，避免每次重推断导致评测漂移';
 COMMENT ON COLUMN file_view.status       IS 'success / failed；单个sheet解析失败不影响同文件其他sheet';
 
 CREATE INDEX IF NOT EXISTS idx_file_view_category ON file_view (category_id, created_at);

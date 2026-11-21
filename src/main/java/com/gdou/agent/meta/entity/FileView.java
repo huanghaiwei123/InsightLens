@@ -50,11 +50,6 @@ public class FileView {
     private String sheetName;
 
     /**
-     * 列类型固化的 JSON 字符串，直读 read_xlsx(types=) 用，避免每次重推断导致评测漂移
-     */
-    private String columnTypes;
-
-    /**
      * 本 sheet 行数，回答回显"基于 N 行数据"
      */
     private Long rowCount;

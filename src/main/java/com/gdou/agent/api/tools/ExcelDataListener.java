@@ -57,7 +57,6 @@ public class ExcelDataListener extends AnalysisEventListener<Map<Integer,String>
                 .sheetName(sheetName)
                 .filePath(filePath)
                 .rowCount((long) data.size())
-                .columnTypes("")
                 .build();
 
         log.info("当前文件{}的sheet{}数据读取完成",fileName,sheetName);
