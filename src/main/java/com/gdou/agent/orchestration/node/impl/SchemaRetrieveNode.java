@@ -49,15 +49,16 @@ public class SchemaRetrieveNode implements Node {
         log.info("[schema] >>> 入参 candidateTables={}, categoryId={}",
                 state.getCandidateTables(), SessionHolder.getCategory());
 
-        // clarify 选中的表；为空（模型没选 / 还没上传数据）时兜底为当前分类下全部视图
+        // clarify 选中的表；为空（模型没选 / 还没上传数据）时兜底为当前分类下全部文件
+        // candidateTables 的语义是原始文件名（file_view.orig_name），与 ClarifyNode 候选清单一致
         if (state.getCandidateTables() == null || state.getCandidateTables().isEmpty()) {
             Integer categoryId = SessionHolder.getCategory();
-            String sql = "select view_name from file_view where status = 'success'";
+            String sql = "select orig_name from file_view where status = 'success'";
             List<String> names = categoryId == null
-                    ? jdbc.queryForList(sql + " order by view_name", String.class)
-                    : jdbc.queryForList(sql + " and category_id = ? order by view_name", String.class, categoryId);
+                    ? jdbc.queryForList(sql + " order by orig_name", String.class)
+                    : jdbc.queryForList(sql + " and category_id = ? order by orig_name", String.class, categoryId);
             state.setCandidateTables(names);
-            log.info("[schema] clarify 未选表，兜底为分类下全部视图 categoryId={}：{}", categoryId, names);
+            log.info("[schema] clarify 未选表，兜底为分类下全部文件 categoryId={}：{}", categoryId, names);
         }
 
         // DDL 取「选中的用户视图 + 全部系统表」：系统表不进 clarify 清单但模型可能关联它们，

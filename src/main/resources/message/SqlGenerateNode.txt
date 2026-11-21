@@ -47,7 +47,7 @@
 除上表外的表全是用户上传 Excel 解析后的数据视图，只含 Excel 原有的列，没有任何系统列。
 
 ### 4.3 数据表关联约定
-候选表都是同一大分类下的视图，可以直接用共同列 JOIN，例如订单视图与退款视图靠 order_id 关联算退款率。限定「最近一次上传」时，用 file_view 子查询取该视图 created_at 最大值对应的记录，再按其 view_name 对应的数据视图取数；用户数据视图上没有 upload_id 或 _batch_id 这类系统列，不要引用。
+候选表都是同一大分类下的视图，可以直接用共同列 JOIN，例如订单视图与退款视图靠 order_id 关联算退款率。限定「最近一次上传」时，用 file_view 子查询按 orig_name 取该视图 created_at 最大值对应的记录，再从 file_path 定位数据文件取数；用户数据视图只含 Excel 原有的列，没有任何系统列，不要凭空引用额外字段。
 
 ### 4.4 硬性规则（下游安全校验会逐条检查）
 1. 只能生成一条 SELECT 语句：禁止分号拼接，禁止 INSERT / UPDATE / DELETE / CREATE / DROP / ALTER / ATTACH 等任何非查询语句。
@@ -104,7 +104,7 @@
 输出：
 {"sql": "select o.category, count(distinct r.order_id) * 1.0 / count(distinct o.order_id) as refund_rate from orders_v1 o left join refunds_v1 r on o.order_id = r.order_id where o.pay_time >= '2026-11-02' and o.pay_time < '2026-11-09' and o.category = '数码' group by o.category limit 200", "sql_explain": "查询上周数码品类的退款率"}
 
-说明：两视图同属一个分类，靠 order_id 直接 JOIN；比率用 1.0 转浮点避免整数除法。数据视图没有 _batch_id 或 upload_id，不要引用。实际字段以输入的表结构为准。
+说明：两视图同属一个分类，靠 order_id 直接 JOIN；比率用 1.0 转浮点避免整数除法。数据视图只含 Excel 原有列，实际字段以输入的表结构为准。
 
 ### 示例 3：修正重试，原因是命中白名单外的表
 输入：
