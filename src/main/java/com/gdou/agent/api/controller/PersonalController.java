@@ -33,6 +33,9 @@ public class PersonalController {
     private static final long SSE_TIMEOUT = 120_000L;
     private static final String SAFE_ERROR = "本轮处理失败，请稍后重试";
     private static final String TIMEOUT_MESSAGE = "连接超时，请重试";
+    private final Integer SQL_QUERY = 1;
+    private final Integer WEB_SEARCH = 2;
+    private final Integer FILE_FOLDER_ACTION = 3;
 
     @Autowired
     private GraphRunner runner;
