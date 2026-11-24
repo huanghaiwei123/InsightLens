@@ -2,14 +2,17 @@ server:
   port: 8080
 
 spring:
-  # 真实密钥放在项目根目录的 application-local.yaml（不进 jar、不进 git）
+  # insightlens.home 由 Electron 启动时通过 -D 传入，指向用户数据目录；
+  # 本地开发不传时用默认值 .（项目根目录），行为与改造前一致。
+  # 真实密钥放在 application-local.yaml（不进 jar、不进 git）
   # 这里不写 optional:，文件缺失就启动失败 —— 快速失败远好过静默 401
   config:
-    import: file:./application-local.yaml
+    import: file:${insightlens.home:.}/application-local.yaml
 
   datasource:
     # 文件模式(持久化,重启数据保留)
-    url: jdbc:duckdb:./data/app.duckdb
+    # 打包后数据库必须放用户数据目录，否则写不进 Program Files
+    url: jdbc:duckdb:${insightlens.home:.}/data/app.duckdb
     # 内存模式(程序退出数据即丢失):url: jdbc:duckdb:
     driver-class-name: org.duckdb.DuckDBDriver
     username: ""
@@ -30,17 +33,20 @@ spring:
           temperature: 0
     mcp:
       client:
-        sse:
+        # Exa / Tavily 官方端点都是 Streamable HTTP（POST /mcp），不是旧版 SSE。
+        # 配成 sse.connections 时框架会自动拼 /sse，请求 /mcp/sse 直接 404。
+        # 注意：url 只写到域名，框架会自动拼 endpoint（默认 /mcp），别把路径重复写进去。
+        streamable-http:
           connections:
             # Exa keyless：裸 URL 即可用，免费限流，无需注册或 API key
-            # 官方原文：works without an API key at a free rate limit
             exa:
-              url: https://mcp.exa.ai/mcp
+              url: https://mcp.exa.ai
             # Tavily 用 API key：Spring AI 1.1.2 的 MCP 连接参数配不了 header，
             # 官方支持把 key 放 URL 参数，占位符从 application-local.yaml（不进 git）读取。
             # keyless 模式需 X-Tavily-Access-Mode header，本版本配不了，故不用。
             tavily:
-              url: https://mcp.tavily.com/mcp/?tavilyApiKey=${tavily.api-key}
+              url: https://mcp.tavily.com
+              endpoint: /mcp/?tavilyApiKey=${tavily.api-key}
 
 
   servlet:
@@ -68,4 +74,5 @@ logging:
     # 排障时把 com.gdou 调成 DEBUG，可额外看到模型返回原文、DDL 查询语句与白名单明细
 
 agent:
-  workspace: /user/data/excel
+  # 上传文件根目录：Electron 打包后 = insightlens.home/data/excel
+  workspace: ${insightlens.home:.}/data/excel
