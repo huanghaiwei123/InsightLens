@@ -2,6 +2,7 @@ package com.gdou.agent.orchestration;
 
 import com.gdou.agent.api.holder.SessionHolder;
 import com.gdou.agent.api.service.MessageService;
+import com.gdou.agent.infra.TraceRecorder;
 import com.gdou.agent.meta.entity.Message;
 import com.gdou.agent.orchestration.node.Node;
 import com.gdou.agent.orchestration.node.NodeName;
@@ -9,9 +10,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -45,6 +46,9 @@ public class GraphRunner {
     @Autowired
     private MessageService messageService;
 
+    @Autowired
+    private TraceRecorder traceRecorder;
+
 
     public GraphReturner run(String question, RunContext ctx) {
         StreamSink sink = ctx.sink();
@@ -63,15 +67,23 @@ public class GraphRunner {
         log.info("[graph] >>> 开始 traceId={}, sink={}, question={}",
                 traceId, sink.getClass().getSimpleName(), question);
 
+        // trace 攒在 ThreadLocal，结束时一次落库；begin/flush 必须成对
+        traceRecorder.begin(traceId, question, SessionHolder.get());
+        boolean success = false;
+        String outcome = "error";
         try {
             int step = 0;
             GraphReturner graphReturner = null;
             while (!nodeName.equals(NodeName.DONE)) {
                 String current = nodeName;
                 long nodeStart = System.currentTimeMillis();
+                LocalDateTime nodeStartTime = LocalDateTime.now();
+                // judge 在路由方法里会把 verdict 重置，这里先留一份给 trace
+                String judgeVerdict = null;
                 step++;
                 log.info("[graph] step={} 进入节点 {}", step, current);
                 sink.nodeStart(current);
+                traceRecorder.currentNode(current);
                 switch (current) {
                     case NodeName.CLARIFY -> {
                         node.get(NodeName.CLARIFY).apply(state, ctx);
@@ -100,6 +112,7 @@ public class GraphRunner {
                     }
                     case NodeName.JUDGE -> {
                         node.get(NodeName.JUDGE).apply(state, ctx);
+                        judgeVerdict = state.getVerdict();
                         nodeName = nextSqlJudge(state, current);
                     }
                     case NodeName.SUMMARIZE -> {
@@ -117,20 +130,69 @@ public class GraphRunner {
                 log.info("[graph] step={} 节点 {} 完成 cost={}ms → 下一节点 {}",
                         step, current, time, nodeName);
                 sink.nodeEnd(current, time, state);
+                traceRecorder.nodeDone(current, nodeStartTime, time,
+                        nodeAttrs(current, state, judgeVerdict));
             }
+            success = graphReturner != null
+                    && (graphReturner.getAnswer() != null || graphReturner.getQuestionToUser() != null);
+            outcome = graphReturner != null && graphReturner.getQuestionToUser() != null
+                    ? "clarify" : "answer";
             log.info("[graph] <<< 结束 traceId={}, cost={}ms, step={}, retryCount={}, answerLen={}",
                     traceId, System.currentTimeMillis() - start, step, state.getRetryCount(),
                     state.getAnswer() == null ? 0 : state.getAnswer().length());
             return graphReturner;
         } catch (Exception e) {
+            outcome = "error:" + e.getClass().getSimpleName();
             log.error("[graph] 执行异常 traceId={}, 中断节点={}, cost={}ms, question={}",
                     traceId, nodeName, System.currentTimeMillis() - start, question, e);
             throw e;
         } finally {
+            traceRecorder.flush(question, success, outcome);
             if (ownsTrace) {
                 MDC.remove(TRACE_ID);
             }
         }
+    }
+
+    /** 按 trace-convention.md 的「关键属性」列提取，属性名逐字符对齐，看板 SQL 才不用猜。 */
+    private Map<String, Object> nodeAttrs(String node, AnalysisState state, String judgeVerdict) {
+        Map<String, Object> attrs = new LinkedHashMap<>();
+        switch (node) {
+            case NodeName.CLARIFY -> {
+                attrs.put("clarified_question", state.getClarifiedQuestion());
+                attrs.put("assumptions", state.getAssumptions() == null
+                        ? new String[0] : state.getAssumptions());
+                attrs.put("need_clarify", state.getNeedClarify());
+            }
+            case NodeName.SCHEMA_RETRIEVE -> {
+                attrs.put("candidate_tables", state.getCandidateTables());
+                attrs.put("schema_len", state.getTableSchemas() == null
+                        ? 0 : state.getTableSchemas().length());
+            }
+            case NodeName.SQL_GENERATE -> {
+                attrs.put("sql", state.getSql());
+                attrs.put("retry_count", state.getRetryCount());
+            }
+            case NodeName.SQL_GUARD -> {
+                attrs.put("validation_result", state.getValidationResult());
+                attrs.put("reject_reason", state.getError());
+            }
+            case NodeName.SQL_EXECUTE -> {
+                attrs.put("row_count", state.getRowCount());
+                attrs.put("error", state.getError());
+            }
+            case NodeName.JUDGE -> {
+                attrs.put("verdict", judgeVerdict);
+                attrs.put("retry_count", state.getRetryCount());
+            }
+            case NodeName.SUMMARIZE -> {
+                attrs.put("answer_len", state.getAnswer() == null ? 0 : state.getAnswer().length());
+                attrs.put("has_assumption", state.getAssumptions() != null
+                        && state.getAssumptions().length > 0);
+            }
+            default -> attrs.put("unknown_node", node);
+        }
+        return attrs;
     }
 
     private String nextClarify(AnalysisState state, String current) {

@@ -2,8 +2,12 @@ package com.gdou.agent.infra;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.metadata.ChatResponseMetadata;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
@@ -23,6 +27,9 @@ public class OpenAiLLmClient implements LlmClient {
 
     private final ChatModel chatModel;
 
+    @Autowired
+    private TraceRecorder traceRecorder;
+
     public OpenAiLLmClient(ChatModel chatModel) {
         this.chatModel = chatModel;
     }
@@ -34,16 +41,36 @@ public class OpenAiLLmClient implements LlmClient {
                 .mapToInt(m -> m.getText() == null ? 0 : m.getText().length()).sum();
         log.info("[llm] >>> call 消息数={}, 输入字符数={}", messages.size(), inputChars);
         try {
-            String text = chatModel.call(new Prompt(messages)).getResult().getOutput().getText();
+            ChatResponse response = chatModel.call(new Prompt(messages));
+            String text = response.getResult().getOutput().getText();
+            long cost = System.currentTimeMillis() - start;
             log.debug("[llm] 模型返回原文：{}", text);
-            log.info("[llm] <<< call 成功 cost={}ms, 返回字符数={}",
-                    System.currentTimeMillis() - start, text == null ? 0 : text.length());
+            log.info("[llm] <<< call 成功 cost={}ms, 返回字符数={}", cost, text == null ? 0 : text.length());
+            recordCall(cost, response);
             return text;
         } catch (Exception e) {
-            log.error("[llm] call 失败 cost={}ms, 消息数={}, 输入字符数={}",
-                    System.currentTimeMillis() - start, messages.size(), inputChars, e);
+            long cost = System.currentTimeMillis() - start;
+            log.error("[llm] call 失败 cost={}ms, 消息数={}, 输入字符数={}", cost, messages.size(), inputChars, e);
+            traceRecorder.llmCall(null, null, cost);
             throw e;
         }
+    }
+
+    /** token 数取模型返回的真实 usage；中转站不返回时记 null，不用字符数冒充 token。 */
+    private void recordCall(long latencyMs, ChatResponse response) {
+        Integer tokensIn = null;
+        Integer tokensOut = null;
+        try {
+            ChatResponseMetadata metadata = response.getMetadata();
+            Usage usage = metadata == null ? null : metadata.getUsage();
+            if (usage != null) {
+                tokensIn = usage.getPromptTokens();
+                tokensOut = usage.getCompletionTokens();
+            }
+        } catch (Exception e) {
+            log.debug("[llm] usage 读取失败，按 null 记：{}", e.getClass().getSimpleName());
+        }
+        traceRecorder.llmCall(tokensIn, tokensOut, latencyMs);
     }
 
     @Override
