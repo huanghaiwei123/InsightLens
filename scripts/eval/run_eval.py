@@ -13,8 +13,13 @@ generated_sql 从日志来的原因：/chat/overAll 只返回 GraphReturner{answ
 「[sql-execute] >>> sql=」，且提示词要求单行 SQL，可以稳定提取。
 
 用法（仓库根目录）：
-  1) 启动应用并把日志落盘（必须 UTF-8，否则中文别名乱码会被误判 sql_error）：
-       mvn -Dfile.encoding=UTF-8 spring-boot:run > app.log 2>&1
+  1) 启动应用并把日志落盘。必须同时满足两点：
+     - UTF-8 编码，否则中文别名乱码会被误判 sql_error；
+     - 注入与评测集 eval_date 一致的基准日，否则「上周 / 近 30 天」相对时间会漂移。
+       （JVM 系统属性由 ClarifyNode 的 insightlens.eval-base-date 读取，生产留空走今天）
+       mvn -Dfile.encoding=UTF-8 spring-boot:run ^
+         "-Dspring-boot.run.jvmArguments=-Dfile.encoding=UTF-8 -Dinsightlens.eval-base-date=2026-11-11" ^
+         "-Dspring-boot.run.arguments=--spring.ai.mcp.client.enabled=false" > app.log 2>&1
   2) 在线采集（SSE 端点需先建 session，脚本内部自动完成）：
        python scripts/eval/run_eval.py collect --log-file app.log
   3) 停掉应用，离线判分：
@@ -180,6 +185,10 @@ def cmd_collect(args) -> None:
     collection = out_dir() / "collection.jsonl"
 
     print(f"[collect] 目标 {args.base_url}，{len(cases)} 题")
+    eval_dates = sorted({c.get("eval_date") for c in cases if c.get("eval_date")})
+    if eval_dates:
+        print(f"[collect] 评测集基准日 {eval_dates}；请确认应用以 "
+              f"-Dinsightlens.eval-base-date=<基准日> 启动，否则相对时间题会漂移")
     if log_path:
         print(f"[collect] 日志文件 {log_path}")
     else:
@@ -255,6 +264,38 @@ def normalize(rows) -> list[tuple[str, ...]]:
                 cells.append(str(v).strip())
         out.append(tuple(cells))
     return out
+
+
+def result_sets_match(expected, actual) -> bool:
+    """按列值多重集合比对：允许 generated SQL 多返回列、列顺序不同、列名不同。
+
+    模型常把别名写成中文口径说明（如「客单价=GMV/用户数」），或顺手多带一列序号；
+    这些都不改变 gold_sql 的答案语义。只要 gold 的每一列都能在 actual 中找到
+    一列值完全一致（含重复值、NULL），就判通过。行顺序无关。
+    """
+    if len(expected) != len(actual):
+        return False
+    if not expected:
+        return True
+    gold_cols = len(expected[0])
+    actual_cols = len(actual[0])
+    if actual_cols < gold_cols:
+        return False
+
+    def assign(i: int, used: set[int]) -> bool:
+        if i == gold_cols:
+            return True
+        gold_values = sorted(row[i] for row in expected)
+        for j in range(actual_cols):
+            if j in used:
+                continue
+            if sorted(row[j] for row in actual) == gold_values:
+                # 回溯：列值重复时贪心可能占掉后面唯一能匹配的列
+                if assign(i + 1, used | {j}):
+                    return True
+        return False
+
+    return assign(0, set())
 
 
 def run_sql(con, sql: str):
@@ -342,14 +383,15 @@ def cmd_score(args) -> None:
                 row["detail"] = str(e)
                 details.append(row)
                 continue
-            # 主判分按「结果集内容」：并列的 ORDER BY 在不同 SQL 写法下顺序可能不同，
-            # 语义等价的答案不该因此被判错。行顺序单独记 order_match 供诊断。
-            row["execution_match"] = sorted(actual) == sorted(expected)
+            # 主判分按「列值内容」：并列 ORDER BY 的行序、模型多带的列都不改变答案语义。
+            # 严格的逐列逐行比较单独记 order_match 供诊断。
+            row["execution_match"] = result_sets_match(expected, actual)
             row["order_match"] = actual == expected
             if not row["execution_match"]:
                 row["error_type"] = "mismatch"
                 row["detail"] = (
-                    f"expected {len(expected)} rows / actual {len(actual)} rows; "
+                    f"expected {len(expected)} rows x {len(expected[0]) if expected else 0} cols / "
+                    f"actual {len(actual)} rows x {len(actual[0]) if actual else 0} cols; "
                     f"head expected={expected[:2]} actual={actual[:2]}"
                 )
             details.append(row)
@@ -369,7 +411,11 @@ def cmd_score(args) -> None:
         "accuracy": round(passed / total, 4) if total else 0.0,
         "avg_latency_ms": round(statistics.mean(latencies), 1) if latencies else None,
         "p95_latency_ms": percentile(latencies, 0.95),
-        "notes": "self-check" if args.self_check else "execution_match，结果集按内容比对（忽略行顺序），order_match 单独记录",
+        "notes": (
+            "self-check" if args.self_check
+            else "execution_match：按列值多重集合比对，忽略列名/列顺序、允许 generated 多列；"
+                 "行顺序单独记 order_match"
+        ),
     }
     report = {"summary": summary, "cases": details}
     report_path = out_dir() / "report.json"
