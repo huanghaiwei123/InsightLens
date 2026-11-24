@@ -1,6 +1,7 @@
 package com.gdou.agent.api.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.gdou.agent.api.service.impl.CategoryReportServiceImpl;
 import com.gdou.agent.api.vo.CategoryReportVO;
 import com.gdou.agent.meta.entity.Category;
 import com.gdou.agent.meta.entity.FileView;
@@ -39,7 +40,7 @@ class CategoryReportServiceTest {
                 view(104, "u3", "orders", "eval://orders", "orders", 200L)
         ));
 
-        CategoryReportService service = new CategoryReportService();
+        CategoryReportServiceImpl service = new CategoryReportServiceImpl();
         ReflectionTestUtils.setField(service, "categoryService", categoryService);
         ReflectionTestUtils.setField(service, "fileViewService", fileViewService);
         ReflectionTestUtils.setField(service, "workSpace", "D:/tmp/workspace");
