@@ -1,25 +1,29 @@
 package com.gdou.agent.api.controller;
 
+import com.alibaba.cloud.ai.graph.streaming.OutputType;
+import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.gdou.agent.api.common.Result;
 import com.gdou.agent.api.constant.CodeConstant;
 import com.gdou.agent.api.constant.MsgConstant;
 import com.gdou.agent.api.holder.SessionHolder;
 import com.gdou.agent.api.service.SessionService;
 import com.gdou.agent.api.service.UploadService;
-import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.infra.stream.SseStreamSink;
 import com.gdou.agent.meta.entity.Session;
-import com.gdou.agent.orchestration.GraphReturner;
 import com.gdou.agent.orchestration.GraphRunner;
 import com.gdou.agent.orchestration.RunContext;
+import com.gdou.agent.react.ReActAgentRunner;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -33,9 +37,6 @@ public class PersonalController {
     private static final long SSE_TIMEOUT = 120_000L;
     private static final String SAFE_ERROR = "本轮处理失败，请稍后重试";
     private static final String TIMEOUT_MESSAGE = "连接超时，请重试";
-    private final Integer SQL_QUERY = 1;
-    private final Integer WEB_SEARCH = 2;
-    private final Integer FILE_FOLDER_ACTION = 3;
 
     @Autowired
     private GraphRunner runner;
@@ -49,6 +50,9 @@ public class PersonalController {
 
     @Autowired
     private UploadService uploadService;
+
+    @Autowired
+    private ReActAgentRunner reactAgentRunner;
 
     /**
      * 用户新建会话窗口，可指定其绑定的大分类。
@@ -86,43 +90,43 @@ public class PersonalController {
                 "Excel 上传管道尚未实现，请稍后再试");
     }
 
-    /**
-     * 用户发起非流式响应对话
-     * @param userMsg
-     * @param sessionId
-     * @return
-     */
-    @PostMapping("/chat/overAll")
-    public Result chat(@RequestParam("userMsg") String userMsg,String sessionId) {
-        Session session = sessionService.getById(sessionId);
-        if (session.getTitle() == null) {
-            session.setTitle(userMsg);
-        }
-        session.setUpdatedAt(LocalDateTime.now());
-        sessionService.updateById(session);
-        SessionHolder.set(session.getId());
-        SessionHolder.setCategory(session.getCategoryId());
-        // traceId 由 ChatInterceptor 在请求线程写入，同一请求的节点日志共用它
-        String traceId = MDC.get(GraphRunner.TRACE_ID);
-        long start = System.currentTimeMillis();
-        log.info("[chat/overAll] >>> 收到请求 traceId={}, userMsg={}, categoryId={}",
-                traceId, userMsg, session.getCategoryId());
-        try {
-            RunContext ctx = new RunContext(traceId, new NoOpStreamSink());
-            GraphReturner returner = runner.run(userMsg, ctx);
-            log.info("[chat/overAll] <<< 完成 traceId={}, cost={}ms",
-                    traceId, System.currentTimeMillis() - start);
-            return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS, returner);
-        } catch (Exception e) {
-            // 完整堆栈由 ExceptionHandle 统一记录，这里只留请求上下文，避免同一异常刷两遍
-            log.error("[chat/overAll] 请求失败 traceId={}, cost={}ms, userMsg={}, type={}",
-                    traceId, System.currentTimeMillis() - start, userMsg, e.getClass().getSimpleName());
-            throw e;
-        } finally {
-            // Tomcat 线程会复用：sessionId 与 categoryId 都要清，否则下一个请求会继承上一个窗口的分类
-            SessionHolder.remove();
-        }
-    }
+//    /**
+//     * 用户发起非流式响应对话
+//     * @param userMsg
+//     * @param sessionId
+//     * @return
+//     */
+//    @PostMapping("/chat/overAll")
+//    public Result chat(@RequestParam("userMsg") String userMsg,String sessionId) {
+//        Session session = sessionService.getById(sessionId);
+//        if (session.getTitle() == null) {
+//            session.setTitle(userMsg);
+//        }
+//        session.setUpdatedAt(LocalDateTime.now());
+//        sessionService.updateById(session);
+//        SessionHolder.set(session.getId());
+//        SessionHolder.setCategory(session.getCategoryId());
+//        // traceId 由 ChatInterceptor 在请求线程写入，同一请求的节点日志共用它
+//        String traceId = MDC.get(GraphRunner.TRACE_ID);
+//        long start = System.currentTimeMillis();
+//        log.info("[chat/overAll] >>> 收到请求 traceId={}, userMsg={}, categoryId={}",
+//                traceId, userMsg, session.getCategoryId());
+//        try {
+//            RunContext ctx = new RunContext(traceId, new NoOpStreamSink());
+//            GraphReturner returner = runner.run(userMsg, ctx);
+//            log.info("[chat/overAll] <<< 完成 traceId={}, cost={}ms",
+//                    traceId, System.currentTimeMillis() - start);
+//            return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS, returner);
+//        } catch (Exception e) {
+//            // 完整堆栈由 ExceptionHandle 统一记录，这里只留请求上下文，避免同一异常刷两遍
+//            log.error("[chat/overAll] 请求失败 traceId={}, cost={}ms, userMsg={}, type={}",
+//                    traceId, System.currentTimeMillis() - start, userMsg, e.getClass().getSimpleName());
+//            throw e;
+//        } finally {
+//            // Tomcat 线程会复用：sessionId 与 categoryId 都要清，否则下一个请求会继承上一个窗口的分类
+//            SessionHolder.remove();
+//        }
+//    }
 
     /**
      * 用户发起流式响应会话
@@ -170,8 +174,20 @@ public class PersonalController {
                     SessionHolder.set(session.getId());
                     SessionHolder.setCategory(session.getCategoryId());
                     RunContext ctx = new RunContext(traceId, sink);
-                    GraphReturner returner = runner.run(userMsg, ctx);
-                    sink.done(returner.getAnswer(), returner.getQuestionToUser());
+                    StringBuilder answer = new StringBuilder();
+                    reactAgentRunner.run(userMsg, ctx)
+                            .doOnNext(nodeOutput -> {
+                                if(nodeOutput instanceof StreamingOutput so && so.getOutputType() == OutputType.AGENT_MODEL_STREAMING){
+                                    Message msg = so.message();
+                                    if(msg instanceof AssistantMessage am && !am.hasToolCalls()){
+                                        if(am.getText()!=null){
+                                            answer.append(am.getText());
+                                            sink.token(am.getText());
+                                        }
+                                    }
+                                }
+                            }).blockLast();
+                    sink.done();
                     log.info("[chat/stream] <<< 完成 traceId={}, cost={}ms",
                             traceId, System.currentTimeMillis() - start);
                 } catch (Exception e) {

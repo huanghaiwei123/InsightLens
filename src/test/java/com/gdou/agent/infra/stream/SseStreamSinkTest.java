@@ -42,11 +42,12 @@ class SseStreamSinkTest {
         SseEmitter emitter = mock(SseEmitter.class);
         SseStreamSink sink = new SseStreamSink(emitter, "trace02");
 
-        sink.done("上周退款率 3.2%", null);
+        sink.done();
         sink.fail(SAFE_ERROR);
 
-        // answer + done 两帧；第二次收口被 completed 挡住
-        verify(emitter, times(2)).send(any(SseEmitter.SseEventBuilder.class));
+        // done() 无参版本只推 done 一帧（答案已由 token 逐字推过，不再重复推）；
+        // 第二次收口 fail 被 completed 挡住，不再推帧
+        verify(emitter, times(1)).send(any(SseEmitter.SseEventBuilder.class));
         verify(emitter, times(1)).complete();
     }
 

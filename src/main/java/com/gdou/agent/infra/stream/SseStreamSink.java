@@ -54,14 +54,9 @@ public class SseStreamSink implements StreamSink {
     }
 
     /** 正常收口：Controller 拿到 GraphReturner 后调用一次 */
-    public void done(String answer, String questionToUser) {
-        if (questionToUser != null && !questionToUser.isBlank()) {
-            send("question", payload("text", questionToUser));
-        } else if (answer != null) {
-            send("answer", payload("text", answer));
-        }
+    public void done() {
         send("done", payload());
-        log.debug("[sse] 正常收口 traceId={}, hasAnswer={}", traceId, answer != null);
+        log.debug("[sse] 正常收口 traceId={}", traceId);
         close();
     }
 

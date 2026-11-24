@@ -61,6 +61,11 @@
             <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
 
+        <!-- Spring AI Alibaba Agent Framework -->
+        <dependency>
+            <groupId>com.alibaba.cloud.ai</groupId>
+            <artifactId>spring-ai-alibaba-agent-framework</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.ai</groupId>
@@ -110,6 +115,12 @@
             <artifactId>fesod-sheet</artifactId>
             <version>2.1.0-incubating</version>
         </dependency>
+
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-client</artifactId>
+        </dependency>
+
     </dependencies>
 
     <build>
