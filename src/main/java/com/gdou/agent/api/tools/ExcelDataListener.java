@@ -2,6 +2,7 @@ package com.gdou.agent.api.tools;
 
 import com.gdou.agent.api.service.FileViewService;
 import com.gdou.agent.meta.entity.FileView;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.fesod.sheet.context.AnalysisContext;
 import org.apache.fesod.sheet.event.AnalysisEventListener;
@@ -16,7 +17,8 @@ import java.util.Map;
  */
 @Slf4j
 public class ExcelDataListener extends AnalysisEventListener<Map<Integer,String>> {
-    private final List<Map<String,String>> data = new LinkedList<>();
+    @Getter
+    private final Map<String,Map<String,String>> data = new LinkedHashMap<>();
 
     private final FileViewService fileViewService;
 
@@ -43,7 +45,7 @@ public class ExcelDataListener extends AnalysisEventListener<Map<Integer,String>
                     map.put(head, value);
                 }
         );
-        data.add(map);
+        data.put(uuid, map);
     }
 
     @Override
@@ -62,10 +64,6 @@ public class ExcelDataListener extends AnalysisEventListener<Map<Integer,String>
                 .build();
         fileViewService.save(view);
         log.info("当前文件{}的sheet{}数据读取完成",fileName,sheetName);
-    }
-
-    public List<Map<String,String>> getData() {
-        return data;
     }
 
     public void removeData(){

@@ -35,10 +35,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 @Service
 @Slf4j
@@ -113,9 +110,10 @@ public class UploadServiceImpl implements UploadService {
         int count = 0;
         for (MultipartFile file : excels) {
             count++;
-            var singleFile = new LinkedHashMap<String,List<Map<String, String>>>();
+            var singleFile = new LinkedHashMap<String,Map<String,Map<String, String>>>();
             String fileName = file.getOriginalFilename();
-            ExcelDataListener listener = new ExcelDataListener(fileViewService, UUID.randomUUID().toString().substring(0,8));
+            String uuid = UUID.randomUUID().toString().substring(0, 8);
+            ExcelDataListener listener = new ExcelDataListener(fileViewService, uuid);
             try(InputStream in = file.getInputStream();
                 ExcelReader reader = FesodSheet.read(in).build()){
                 List<ReadSheet> sheets = reader.excelExecutor().sheetList();
@@ -123,7 +121,7 @@ public class UploadServiceImpl implements UploadService {
                 List<String> sheetName = sheets.stream().map(ReadSheet::getSheetName).toList();
                 for (String name : sheetName) {
                     FesodSheet.read(in,listener).sheet(name).doRead();
-                    List<Map<String, String>> data = listener.getData();
+                    Map<String, Map<String, String>> data = listener.getData();
                     listener.removeData();
                     singleFile.put(name,data);
                 }
@@ -172,7 +170,7 @@ public class UploadServiceImpl implements UploadService {
                     }
                     Integer categoryId = category.getId();
                     LambdaUpdateWrapper<FileView> viewWrapper = new LambdaUpdateWrapper<>();
-                    viewWrapper.eq(FileView::getOrigName,transfer.fileName()).set(FileView::getCategoryId,categoryId);
+                    viewWrapper.eq(FileView::getUploadId,transfer.uuid()).set(FileView::getCategoryId,categoryId).set(FileView::getFilePath,transfer.to()+"/"+transfer.fileName());
                     fileViewService.update(viewWrapper);
                 }
             }
