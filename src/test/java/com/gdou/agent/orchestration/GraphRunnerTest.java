@@ -4,6 +4,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.gdou.agent.api.service.MessageService;
+import com.gdou.agent.infra.TraceRecorder;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.orchestration.node.Node;
 import com.gdou.agent.orchestration.node.NodeName;
@@ -24,6 +25,7 @@ import java.util.function.Consumer;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 /**
  * 状态机调度：节点顺序、澄清中断、两条修正回边、retryCount 语义、MDC 生命周期、节点埋点。
@@ -53,9 +55,15 @@ class GraphRunnerTest {
 
     /** GraphRunner 的 node / messageService 都是 @Autowired 字段；纯单测没有容器，手动塞入假节点与 mock */
     private static GraphRunner newRunner(Map<String, Node> nodes) {
+        return newRunner(nodes, mock(TraceRecorder.class));
+    }
+
+    /** 需要断言 Trace 埋点时，传入外部持有的 mock */
+    private static GraphRunner newRunner(Map<String, Node> nodes, TraceRecorder recorder) {
         GraphRunner runner = new GraphRunner();
         ReflectionTestUtils.setField(runner, "node", nodes);
         ReflectionTestUtils.setField(runner, "messageService", mock(MessageService.class));
+        ReflectionTestUtils.setField(runner, "traceRecorder", recorder);
         return runner;
     }
 
@@ -120,6 +128,33 @@ class GraphRunnerTest {
                 NodeName.SQL_GUARD, NodeName.SQL_EXECUTE, NodeName.JUDGE, NodeName.SUMMARIZE);
         assertThat(result.getAnswer()).isEqualTo("上周退款率 3.2%");
         assertThat(result.getQuestionToUser()).isNull();
+    }
+
+    @Test
+    @DisplayName("状态机每次 run 都成对调用 trace begin/flush，异常路径也 flush")
+    void traceLifecycle() {
+        TraceRecorder recorder = mock(TraceRecorder.class);
+        List<String> order = new ArrayList<>();
+        newRunner(nodes(order, happyPath()), recorder).run("上周退款率", testContext());
+
+        verify(recorder).begin(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq("上周退款率"),
+                org.mockito.ArgumentMatchers.any());
+        verify(recorder).flush("上周退款率", true, "answer");
+        verify(recorder, org.mockito.Mockito.times(7)).nodeDone(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyMap());
+
+        TraceRecorder recorder2 = mock(TraceRecorder.class);
+        Map<String, Consumer<AnalysisState>> boom = new HashMap<>();
+        boom.put(NodeName.CLARIFY, s -> { throw new IllegalStateException("boom"); });
+        assertThatThrownBy(() -> newRunner(nodes(new ArrayList<>(), boom), recorder2)
+                .run("q", testContext())).isInstanceOf(IllegalStateException.class);
+        verify(recorder2).flush(org.mockito.ArgumentMatchers.eq("q"),
+                org.mockito.ArgumentMatchers.eq(false),
+                org.mockito.ArgumentMatchers.contains("error:"));
     }
 
     @Test
