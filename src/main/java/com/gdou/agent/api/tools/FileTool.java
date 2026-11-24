@@ -58,11 +58,13 @@ public class FileTool {
     public String transfer(String source,  String target){
         Path sour = Path.of(workSpace, source);
         Path tar = Path.of(workSpace, target);
-        log.info("正在移动分类{}下的文件到分类{}",source.substring(0,source.lastIndexOf("/")),target);
+        String category = source.substring(0, source.lastIndexOf("/"));
+        String file = source.substring(source.lastIndexOf("/") + 1);
+        log.info("正在移动分类{}下的文件{}到分类{}",category,file,target);
         try {
             Files.createDirectories(tar);
             Files.move(sour,tar);
-            log.info("文件移动成功,分类{}下的文件已经进入分类{}下",source.substring(0,source.lastIndexOf("/")),target);
+            log.info("文件移动成功,分类{}下的文件{}已经进入分类{}下",source.substring(0,source.lastIndexOf("/")), file,target);
             return "文件移动成功，分类路径"+source+"下的文件已经全部进入分类路径"+target+"下";
         } catch (IOException e) {
             log.error("文件移动失败，请检查原因：{}",e.getMessage());
