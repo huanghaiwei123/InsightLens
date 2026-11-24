@@ -6,6 +6,7 @@ import com.gdou.agent.api.common.Result;
 import com.gdou.agent.api.constant.CodeConstant;
 import com.gdou.agent.api.constant.MsgConstant;
 import com.gdou.agent.api.holder.SessionHolder;
+import com.gdou.agent.api.service.CategoryReportService;
 import com.gdou.agent.api.service.SessionService;
 import com.gdou.agent.api.service.UploadService;
 import com.gdou.agent.infra.stream.SseStreamSink;
@@ -52,6 +53,9 @@ public class PersonalController {
     private UploadService uploadService;
 
     @Autowired
+    private CategoryReportService categoryReportService;
+
+    @Autowired
     private ReActAgentRunner reactAgentRunner;
 
     /**
@@ -76,6 +80,26 @@ public class PersonalController {
             log.error("用户新建会话窗口失败，请检查原因");
             return Result.success(CodeConstant.CALL_ERROR, MsgConstant.CALL_ERROR, null);
         }
+    }
+
+    /**
+     * 分类报表：category → file(upload_id 去重) → sheet 三层树，供 Electron 客户端渲染。
+     * 只查元数据表，不读 Excel 内容，也不触发任何模型调用。
+     */
+    @GetMapping("/report/categories")
+    public Result reportCategories() {
+        return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS,
+                categoryReportService.buildReport());
+    }
+
+    /**
+     * 上传文件根目录的绝对路径。Electron 用「workspaceRoot + 分类名 + 原始文件名」
+     * 重建本地路径，再交给 shell.showItemInFolder 在资源管理器中定位文件。
+     */
+    @GetMapping("/config")
+    public Result config() {
+        return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS,
+                Map.of("workspaceRoot", categoryReportService.workspaceRoot()));
     }
 
     /**
