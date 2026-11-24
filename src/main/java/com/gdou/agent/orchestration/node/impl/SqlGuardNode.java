@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
  *   ② 单语句               —— 剥掉字符串字面量与注释后不允许出现分号
  *   ③ 无 DDL/DML           —— 危险关键词黑名单，覆盖 CTE 与函数调用内的隐藏写法
  *   ④ 必须带 LIMIT          —— 缺失时自动追加 LIMIT 200（格式问题，不算安全拒绝）
- *   ⑤ 表名白名单           —— 候选表 + 系统表之外一律拒绝
+ *   ⑤ 表名白名单           —— 可用表清单 + 系统表之外一律拒绝
  *   ⑥ 禁止跨库/外部文件     —— ATTACH 由黑名单覆盖，read_* 表函数单独拦截
  *   ⑦ 时间口径显式（窄化版）—— 仅当「引用时间字段 && 无时间条件 && 无聚合 && 无 LIMIT」
  *                              四者同时成立才拒绝；其余时间口径问题（如聚合无边界）
@@ -38,7 +38,7 @@ import java.util.regex.Pattern;
 @Service(NodeName.SQL_GUARD)
 public class SqlGuardNode implements Node {
 
-    /** 系统表：提示词约定模型可查这些元数据表，与候选表共同构成白名单 */
+    /** 系统表：提示词约定模型可查这些元数据表，与可用表清单共同构成白名单 */
     private static final Set<String> SYSTEM_TABLES = Set.of(
             "session", "message", "category", "file_view",
             "evaluation_run", "eval_case_result", "trace_span");

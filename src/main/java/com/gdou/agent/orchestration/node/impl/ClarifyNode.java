@@ -1,5 +1,6 @@
 package com.gdou.agent.orchestration.node.impl;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,6 +17,7 @@ import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -44,16 +46,34 @@ public class ClarifyNode implements Node {
     @Autowired
     private MessageService messageService;
 
+    /**
+     * 相对时间换算的基准日。生产留空走今天；评测时通过 -Dinsightlens.eval-base-date=2026-11-11
+     * 注入固定值，与评测集 eval_date / gold_sql 对齐，避免日期漂移导致正确率虚低。
+     */
+    @Value("${insightlens.eval-base-date:}")
+    private String evalBaseDate;
+
     @Override
     public void apply(AnalysisState state, RunContext ctx) {
         long start = System.currentTimeMillis();
         String question = state.getQuestion();
-        // 相对时间需要锚点：把当前日期拼进 SystemMessage，不碰 userMessage（原始问题仍是第一行）
-        String baseDate = LocalDate.now().toString();
+        // 相对时间需要锚点：把基准日期拼进 SystemMessage，不碰 userMessage（原始问题仍是第一行）
+        String baseDate = (evalBaseDate == null || evalBaseDate.isBlank())
+                ? LocalDate.now().toString() : evalBaseDate.trim();
         String systemMessage = prompt("message/ClarifyNode.txt")
                 + "\n\n## 当前日期\n" + baseDate
                 + "\n问题里的「今天 / 上周 / 近 30 天 / 今年」等相对时间，一律以该日期为基准换算成具体起止日期，"
                 + "并写进 clarified_question 与 assumptions 两处。";
+        // 口径词典只存在库表注释里，澄清阶段看不到它就会自行猜指标算法并写进 assumptions，
+        // 生成阶段再忠实执行错误假设。这里把词典注入 systemMessage 并声明其优先级高于推断。
+        String glossary = businessGlossary();
+        if (!glossary.isEmpty()) {
+            systemMessage += "\n\n## 库内口径词典（最高优先级，先读再补全）\n" + glossary
+                    + "\n\n使用规则：\n"
+                    + "- 词典已定义的指标算法、分母范围、状态枚举、时间字段与时间边界必须逐字沿用，"
+                    + "不得自行改写，也不得就这些项向用户追问；把实际采用的定义逐条写进 assumptions。\n"
+                    + "- 词典未定义的项才由你推断；相对时间换算结果若与词典边界不一致，以词典为准。";
+        }
         buildMessage(systemMessage, "system");
         String tables = tableList();
         // 标题与 ClarifyNode.txt 的「1. 输入」逐字对齐，第三列是行数不是列定义
@@ -61,21 +81,34 @@ public class ClarifyNode implements Node {
         List<Message> messages = List.of(
                 new SystemMessage(systemMessage),
                 new UserMessage(userMessage));
-        log.info("[clarify] >>> baseDate={}, question={}, categoryId={}, 候选表行数={}",
-                baseDate, question, SessionHolder.getCategory(), tables.lines().count());
+        log.info("[clarify] >>> baseDate={}, glossaryChars={}, question={}, categoryId={}, 候选表行数={}",
+                baseDate, glossary.length(), question, SessionHolder.getCategory(), tables.lines().count());
 
         String raw = LlmClient.call(messages);
         log.debug("[clarify] 模型返回原文：{}", raw);
         ClarifyEntity node = parseJson(raw);
         BeanUtils.copyProperties(node, state);
-        // selectedTables 与 state 字段名不同，copyProperties 映射不到，显式赋值：
-        // candidateTables 从此语义为「clarify 选中的表」，schema_retrieve 空时才兜底全量
-        state.setCandidateTables(
-                node.selectedTables() == null ? List.of() : List.of(node.selectedTables()));
+        // 选表已废弃：候选表由 schema_retrieve 按当前分类从 file_view 全量收集，澄清阶段不再输出 selected_tables
         long end = System.currentTimeMillis();
-        log.info("[clarify] <<< cost={}ms, needClarify={}, clarifiedQuestion={}, assumptions={}, selectedTables={}, questionToUser={}",
+        log.info("[clarify] <<< cost={}ms, needClarify={}, clarifiedQuestion={}, assumptions={}, questionToUser={}",
                 end - start, state.getNeedClarify(), state.getClarifiedQuestion(),
-                Arrays.toString(state.getAssumptions()), state.getCandidateTables(), state.getQuestionToUser());
+                Arrays.toString(state.getAssumptions()), state.getQuestionToUser());
+    }
+
+    /**
+     * 读取业务表的表注释（口径词典写在 COMMENT ON TABLE 里）注入澄清阶段。
+     * 注入全部业务表；系统表注释对业务口径无帮助，排除。
+     * 换行压成空格，避免把一条定义拆成多行稀释提示词。
+     */
+    private String businessGlossary() {
+        String sql = "select '-- ' || table_name || '：' || replace(comment, chr(10), ' ')"
+                + " from duckdb_tables()"
+                + " where schema_name = 'main' and comment is not null and comment <> ''"
+                + " and lower(table_name) not in ('session','message','category','file_view',"
+                + "'evaluation_run','eval_case_result','trace_span')"
+                + " order by table_name";
+        List<String> lines = jdbc.queryForList(sql, String.class);
+        return lines == null || lines.isEmpty() ? "" : String.join("\n", lines);
     }
 
     /**
@@ -159,6 +192,7 @@ public class ClarifyNode implements Node {
  * 提示词要求 snake_case，这里必须显式映射：
  * Jackson 默认按字段名精确匹配，不写 @JsonProperty 会静默得到全 null。
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 record ClarifyEntity (
 
     @JsonProperty("clarified_question")
@@ -171,10 +205,6 @@ record ClarifyEntity (
     Boolean needClarify,
 
     @JsonProperty("question_to_user")
-    String questionToUser,
-
-    /** 从候选表清单中选出的、与问题相关的表名；无相关表时为空数组 */
-    @JsonProperty("selected_tables")
-    String[] selectedTables
+    String questionToUser
 
 ){}

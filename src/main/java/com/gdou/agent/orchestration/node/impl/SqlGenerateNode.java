@@ -23,7 +23,8 @@ import java.util.List;
 
 /**
  * ③ SQL 生成节点
- * 入：clarifiedQuestion、candidateTables、tableSchemas、assumptions、上一轮 error（修正循环时）
+ * 入：clarifiedQuestion、candidateTables（schema 节点按分类全量收集的可用表清单）、
+ *     tableSchemas、assumptions、上一轮 error（修正循环时）
  * 出：sql、sqlExplain
  */
 @Slf4j
@@ -72,7 +73,7 @@ public class SqlGenerateNode implements Node {
      */
     private String buildUserMessage(AnalysisState state) {
         StringBuilder sb = new StringBuilder();
-        sb.append("候选表：").append(state.getCandidateTables()).append('\n');
+        sb.append("可用表清单：").append(state.getCandidateTables()).append('\n');
         sb.append("澄清后的问题：").append(state.getClarifiedQuestion()).append('\n');
         sb.append("口径假设：").append(
                 state.getAssumptions() == null ? "无" : String.join("；", state.getAssumptions()))

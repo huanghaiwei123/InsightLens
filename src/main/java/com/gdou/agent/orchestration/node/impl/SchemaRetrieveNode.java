@@ -21,8 +21,11 @@ import java.util.Set;
 
 /**
  * ② Schema 检索节点
- * 入：clarify 选中的表名（state.candidateTables，可能为空）
- * 出：candidateTables（空时兜底为分类下全部视图）、tableSchemas（选中视图 + 系统表的列结构）
+ * 入：当前窗口的 categoryId（SessionHolder）
+ * 出：candidateTables（分类下全部可用视图，同时作为下游表名白名单）、tableSchemas（这些视图 + 系统表的列结构）
+ *
+ * 选表机制已废弃：不再由 clarify 模型挑表，这里直接按分类把 file_view 里 status=success 的表全量收集。
+ * 表名由此成为「可用表清单」——代表能用哪些表，不代表这次该用哪些表，由 SQL 生成节点自行判断相关性。
  *
  * 用户表都是 DuckDB VIEW（CREATE VIEW ... AS SELECT * FROM read_xlsx(...)），
  * duckdb_tables().sql 拿到的是 CREATE VIEW 定义、不含列名与类型，模型无法据此写 SQL。
@@ -46,22 +49,20 @@ public class SchemaRetrieveNode implements Node {
     @Override
     public void apply(AnalysisState state, RunContext ctx) {
         long start = System.currentTimeMillis();
-        log.info("[schema] >>> 入参 candidateTables={}, categoryId={}",
-                state.getCandidateTables(), SessionHolder.getCategory());
+        Integer categoryId = SessionHolder.getCategory();
+        log.info("[schema] >>> categoryId={}", categoryId);
 
-        // clarify 选中的表；为空（模型没选 / 还没上传数据）时兜底为当前分类下全部文件
-        // candidateTables 的语义是原始文件名（file_view.orig_name），与 ClarifyNode 候选清单一致
-        if (state.getCandidateTables() == null || state.getCandidateTables().isEmpty()) {
-            Integer categoryId = SessionHolder.getCategory();
-            String sql = "select orig_name from file_view where status = 'success'";
-            List<String> names = categoryId == null
-                    ? jdbc.queryForList(sql + " order by orig_name", String.class)
-                    : jdbc.queryForList(sql + " and category_id = ? order by orig_name", String.class, categoryId);
-            state.setCandidateTables(names);
-            log.info("[schema] clarify 未选表，兜底为分类下全部文件 categoryId={}：{}", categoryId, names);
-        }
+        // 选表废弃后无条件按分类全量收集：candidateTables 是「可用表清单」，
+        // 既是本节点取 DDL 的范围，也是 SqlGuardNode 的表名白名单。
+        // 列名用 file_view.orig_name（原始文件名），与 ClarifyNode 展示给模型的候选清单一致。
+        String sql = "select orig_name from file_view where status = 'success'";
+        List<String> names = categoryId == null
+                ? jdbc.queryForList(sql + " order by orig_name", String.class)
+                : jdbc.queryForList(sql + " and category_id = ? order by orig_name", String.class, categoryId);
+        state.setCandidateTables(names);
+        log.info("[schema] 按分类收集可用表 categoryId={}：{}", categoryId, names);
 
-        // DDL 取「选中的用户视图 + 全部系统表」：系统表不进 clarify 清单但模型可能关联它们，
+        // DDL 取「分类下全部用户视图 + 全部系统表」：系统表不进候选清单但模型可能关联它们，
         // 不给列信息模型就会凭空捏造字段名
         List<String> wantTables = new ArrayList<>();
         Set<String> distinct = new HashSet<>();

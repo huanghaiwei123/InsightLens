@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -21,13 +22,15 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * ① 澄清节点：file_view → 候选表清单 → 模型选表 → state 的映射。
+ * ① 澄清节点：file_view → 展示用候选表清单 → 模型补全口径 → state 的映射。
+ * 选表已废弃：candidateTables 由 schema_retrieve 全量收集，本节点不再输出 selected_tables。
  * JdbcTemplate 与 LlmClient 都是假的，不碰 DuckDB、不调模型。
  */
 class ClarifyNodeTest {
@@ -71,7 +74,7 @@ class ClarifyNodeTest {
     }
 
     @Test
-    @DisplayName("snake_case 响应正确落到 state，selected_tables 映射为 candidateTables")
+    @DisplayName("snake_case 响应正确落到 state，且不再解析已废弃的 selected_tables")
     void parseClarifyResponse() {
         when(llmClient.call(anyList())).thenReturn("""
                 好的，我理解了：
@@ -87,7 +90,8 @@ class ClarifyNodeTest {
         assertThat(state.getAssumptions()).containsExactly("按班级平均");
         assertThat(state.getNeedClarify()).isFalse();
         assertThat(state.getQuestionToUser()).isNull();
-        assertThat(state.getCandidateTables()).containsExactly("成绩汇总_2026.xlsx");
+        // 模型即使多输出 selected_tables 也被忽略；candidateTables 留给 schema 节点填
+        assertThat(state.getCandidateTables()).isNull();
     }
 
     @Test
@@ -95,7 +99,7 @@ class ClarifyNodeTest {
     void tableListFormat() {
         when(llmClient.call(anyList())).thenReturn(
                 "{\"clarified_question\":\"平均分\",\"assumptions\":[],\"need_clarify\":false,"
-                        + "\"question_to_user\":null,\"selected_tables\":[\"成绩汇总_2026.xlsx\"]}");
+                        + "\"question_to_user\":null}");
 
         node.apply(state, CTX);
 
@@ -111,26 +115,32 @@ class ClarifyNodeTest {
     void needClarify() {
         when(llmClient.call(anyList())).thenReturn(
                 "{\"clarified_question\":\"\",\"assumptions\":[],\"need_clarify\":true,"
-                        + "\"question_to_user\":\"「这次」指哪次考试？[春季期中] [秋季期末]\","
-                        + "\"selected_tables\":[]}");
+                        + "\"question_to_user\":\"「这次」指哪次考试？[春季期中] [秋季期末]\"}");
 
         node.apply(state, CTX);
 
         assertThat(state.getNeedClarify()).isTrue();
         assertThat(state.getQuestionToUser()).contains("「这次」指哪次考试？");
-        assertThat(state.getCandidateTables()).isEmpty();
     }
 
     @Test
-    @DisplayName("selected_tables 缺失时 candidateTables 为空集合而不是 null")
-    void missingSelectedTables() {
+    @DisplayName("库内口径词典注入 systemMessage，且声明优先于模型推断")
+    void glossaryInjected() {
+        doReturn(List.of("-- orders：GMV = SUM(pay_amount)，时间字段用 pay_time"))
+                .when(jdbc).queryForList(anyString(), eq(String.class));
         when(llmClient.call(anyList())).thenReturn(
-                "{\"clarified_question\":\"平均分\",\"assumptions\":[],\"need_clarify\":false,"
-                        + "\"question_to_user\":null}");
+                "{\"clarified_question\":\"GMV\",\"assumptions\":[\"GMV = SUM(pay_amount)\"],"
+                        + "\"need_clarify\":false,\"question_to_user\":null}");
 
         node.apply(state, CTX);
 
-        assertThat(state.getCandidateTables()).isNotNull().isEmpty();
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Message>> captor = ArgumentCaptor.forClass(List.class);
+        verify(llmClient).call(captor.capture());
+        String system = ((SystemMessage) captor.getValue().get(0)).getText();
+        assertThat(system).contains("库内口径词典")
+                .contains("GMV = SUM(pay_amount)，时间字段用 pay_time")
+                .contains("最高优先级");
     }
 
     @Test
@@ -139,7 +149,7 @@ class ClarifyNodeTest {
         doReturn(List.<Map<String, Object>>of()).when(jdbc).queryForList(anyString());
         when(llmClient.call(anyList())).thenReturn(
                 "{\"clarified_question\":\"平均分\",\"assumptions\":[],\"need_clarify\":true,"
-                        + "\"question_to_user\":\"请先上传数据\",\"selected_tables\":[]}");
+                        + "\"question_to_user\":\"请先上传数据\"}");
 
         node.apply(state, CTX);
 

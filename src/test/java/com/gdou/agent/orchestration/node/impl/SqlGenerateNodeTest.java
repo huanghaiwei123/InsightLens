@@ -66,7 +66,7 @@ class SqlGenerateNodeTest {
 
         assertThat(state.getSql()).isEqualTo("select category from sales limit 10");
         assertThat(state.getSqlExplain()).isEqualTo("按品类查销量");
-        assertThat(userMessage()).contains("澄清后的问题：上周各品类退款率", "候选表：[sales]");
+        assertThat(userMessage()).contains("澄清后的问题：上周各品类退款率", "可用表清单：[sales]");
     }
 
     @Test
@@ -76,7 +76,7 @@ class SqlGenerateNodeTest {
         state.setError("查询了白名单之外的表：secret_table");
         state.setSql("select * from secret_table limit 10");
         when(llmClient.call(anyList())).thenReturn(
-                "{\"sql\":\"select * from sales limit 10\",\"sql_explain\":\"改用候选表\"}");
+                "{\"sql\":\"select * from sales limit 10\",\"sql_explain\":\"改用可用表清单里的表\"}");
 
         node.apply(state, CTX);
 

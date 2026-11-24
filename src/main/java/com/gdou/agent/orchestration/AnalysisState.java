@@ -27,7 +27,7 @@ public class AnalysisState implements Serializable {
     /** needClarify=true 时抛给用户的那句话；否则为 null */
     private String questionToUser;
 
-    /** clarify 选中的表名（selected_tables）；schema_retrieve 为空时兜底为注册表全量 */
+    /** 可用表清单：schema_retrieve 按当前分类从 file_view 全量收集，兼作 SQL 表名白名单 */
     private List<String> candidateTables;
 
     /** 命中表的 DDL + 字段注释，拼进提示词 */
