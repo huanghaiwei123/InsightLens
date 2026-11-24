@@ -63,6 +63,7 @@ public class PersonalController {
     public Result create(@RequestParam(value = "categoryId", required = false) Integer categoryId) {
         log.info("用户正在新建会话窗口，categoryId={}", categoryId);
         Session session = Session.builder()
+                .title("新会话")  // DDL 要求 NOT NULL；标题在首轮对话时再改成提问摘要
                 .categoryId(categoryId)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
