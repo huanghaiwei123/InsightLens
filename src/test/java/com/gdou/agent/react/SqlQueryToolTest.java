@@ -39,7 +39,7 @@ class SqlQueryToolTest {
         when(runner.run(eq("上周各品类退款率"), same(ctx)))
                 .thenReturn(GraphReturner.builder().answer("数码 12.5%，服饰 8.1%").build());
 
-        String json = new SqlQueryTool(runner, ctx).query("上周各品类退款率");
+        String json = new SqlQueryTool(runner, ctx, 1, null).query("上周各品类退款率");
 
         verify(runner).run(eq("上周各品类退款率"), same(ctx));
         JsonNode node = mapper.readTree(json);
@@ -56,7 +56,7 @@ class SqlQueryToolTest {
         when(runner.run(eq("退款率是多少"), same(ctx)))
                 .thenReturn(GraphReturner.builder().questionToUser("请补充统计的时间范围").build());
 
-        String json = new SqlQueryTool(runner, ctx).query("退款率是多少");
+        String json = new SqlQueryTool(runner, ctx, 1, null).query("退款率是多少");
 
         verify(runner).run(eq("退款率是多少"), same(ctx));
         JsonNode node = mapper.readTree(json);
