@@ -28,6 +28,21 @@ spring:
           # 与 Codex config.toml 的 model 保持一致：gpt-6-luna（不是 gpt-6.1-luna）
           model: gpt-6-luna
           temperature: 0
+    mcp:
+      client:
+        sse:
+          connections:
+            # Exa keyless：裸 URL 即可用，免费限流，无需注册或 API key
+            # 官方原文：works without an API key at a free rate limit
+            exa:
+              url: https://mcp.exa.ai/mcp
+            # Tavily 用 API key：Spring AI 1.1.2 的 MCP 连接参数配不了 header，
+            # 官方支持把 key 放 URL 参数，占位符从 application-local.yaml（不进 git）读取。
+            # keyless 模式需 X-Tavily-Access-Mode header，本版本配不了，故不用。
+            tavily:
+              url: https://mcp.tavily.com/mcp/?tavilyApiKey=${tavily.api-key}
+
+
   servlet:
     multipart:
       max-file-size: 1KB
