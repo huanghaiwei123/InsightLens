@@ -199,8 +199,9 @@ public class GraphRunner {
         String next = Boolean.TRUE.equals(state.getNeedClarify())
                 ? NodeName.DONE : NodeName.SCHEMA_RETRIEVE;
         log.info("[graph] clarify 路由 from={} → {}, needClarify={}", current, next, state.getNeedClarify());
-        buildMessage(state.getAnswer(),"user");
-        if(state.getNeedClarify()) buildMessage(state.getQuestionToUser(),"assistant");
+        // clarify 阶段 answer 尚未生成，user 消息记原始问题；content 是 NOT NULL，不能传 null
+        buildMessage(state.getQuestion(), "user");
+        if (state.getNeedClarify()) buildMessage(state.getQuestionToUser(), "assistant");
         return next;
     }
 
@@ -250,6 +251,7 @@ public class GraphRunner {
     }
 
     public void buildMessage(String msg,String role){
+        if (msg == null || msg.isBlank()) return;  // message.content 是 NOT NULL
         Integer id = SessionHolder.get();
         Message message = Message.builder()
                 .sessionId(id)
