@@ -110,7 +110,7 @@ public class PersonalController {
     @PostMapping("/upload")
     public Result upload(@RequestParam("excel") List<MultipartFile> excels) {
         log.warn("用户正在上传{}个文件，正在处理", excels.size());
-        return Result.success(CodeConstant.CALL_ERROR, MsgConstant.CALL_ERROR,
+        return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS,
                 uploadService.upload(excels));
     }
 
