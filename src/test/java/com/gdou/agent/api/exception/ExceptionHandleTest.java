@@ -56,12 +56,13 @@ class ExceptionHandleTest {
     }
 
     @Test
-    @DisplayName("业务异常指定 code 时透传该 code")
+    @DisplayName("显式业务码的异常：透传 code 并把业务消息回显到 data")
     void keepCustomBusinessCode() throws Exception {
         mvc.perform(get("/probe/business-with-code"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("400"))
-                .andExpect(jsonPath("$.msg").value(MsgConstant.CALL_ERROR));
+                .andExpect(jsonPath("$.msg").value(MsgConstant.CALL_ERROR))
+                .andExpect(jsonPath("$.data").value("自定义业务错误码"));
     }
 
     @Test

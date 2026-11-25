@@ -10,9 +10,10 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 /**
  * 全局异常兜底：把异常收敛成与成功响应同构的 Result，前端只需按 code 分支。
  *
- * 对外统一使用 CALL_ERROR 文案，不把异常 message 透给前端：
- * 部分 BusinessException 的 message 里拼了模型返回原文（如「原文：{raw}」），
- * 直接返回会泄漏提示词与 SQL；完整原文只保留在服务端日志里供排查。
+ * 回显策略：
+ * - 显式指定业务码的 BusinessException：data 回显业务消息，前端可直接展示；
+ * - 未指定业务码的 BusinessException / 未预期异常：只回通用文案，
+ *   避免把模型返回原文（提示词 + SQL）或系统异常细节透给前端，完整信息只留服务端日志。
  */
 @Slf4j
 @RestControllerAdvice
@@ -26,7 +27,8 @@ public class ExceptionHandle {
     public Result handleBusinessException(BusinessException e) {
         String code = e.getCode() == null ? CodeConstant.CALL_ERROR : e.getCode();
         log.warn("[exception] 业务异常 code={}, message={}", code, e.getMessage());
-        return Result.error(code, MsgConstant.CALL_ERROR, null);
+        Object data = e.getCode() == null ? null : e.getMessage();
+        return Result.error(code, MsgConstant.CALL_ERROR, data);
     }
 
     /**
