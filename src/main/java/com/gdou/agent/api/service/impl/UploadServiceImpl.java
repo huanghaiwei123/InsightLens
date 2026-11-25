@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gdou.agent.api.constant.CodeConstant;
+import com.gdou.agent.api.exception.BusinessException;
 import com.gdou.agent.api.tools.ExcelDataListener;
 import com.gdou.agent.api.service.CategoryService;
 import com.gdou.agent.api.service.FileViewService;
@@ -113,7 +115,8 @@ public class UploadServiceImpl implements UploadService {
             afterLLmCall(answer);
             log.info("执行完成");
         }catch (Exception e){
-            return "文件上传失败，如频繁遇到该问题请联系管理员解决这个问题";
+            log.error("文件上传失败", e);
+            throw new BusinessException(CodeConstant.CALL_ERROR, "文件上传失败，请稍后重试");
         }
         return "文件上传完毕，已为您解析好数据";
     }
