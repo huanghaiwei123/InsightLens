@@ -48,3 +48,8 @@ scripts/eval/out/
 app.log
 __pycache__/
 *.pyc
+
+### 前端工程：依赖与本地产物不入库，构建产物 static/ 由 npm run build 生成并随后端打包
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
