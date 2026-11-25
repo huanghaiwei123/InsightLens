@@ -2,7 +2,16 @@
 const BASE = typeof __API_BASE__ !== 'undefined' ? __API_BASE__ : ''
 const PREFIX = BASE + '/personal'
 
-/** 统一 Result：{ code, msg, data }。code 非 "200" 视为业务失败。 */
+/**
+ * 统一 Result：{ code, msg, data }。code 非 "200" 视为业务失败。
+ * 失败时优先展示 data 里的业务消息（显式业务码的异常会回显），msg 只是通用兜底。
+ */
+function errorMessage(payload, fallback) {
+  const data = payload && typeof payload.data === 'string' ? payload.data : ''
+  const msg = payload && typeof payload.msg === 'string' ? payload.msg : ''
+  return data || msg || fallback
+}
+
 async function unwrap(res) {
   let payload
   try {
@@ -11,7 +20,7 @@ async function unwrap(res) {
     throw new Error('服务返回的内容无法解析（HTTP ' + res.status + '）')
   }
   if (!res.ok || String(payload.code) !== '200') {
-    throw new Error(payload.msg || ('请求失败（HTTP ' + res.status + '）'))
+    throw new Error(errorMessage(payload, '请求失败（HTTP ' + res.status + '）'))
   }
   return payload.data
 }
@@ -49,7 +58,7 @@ export function chatStream(userMsg, sessionId, { onToken, onNode, onDone, onErro
     if (ct.indexOf('text/event-stream') === -1) {
       const text = await res.text()
       let msg = '服务未返回流式结果'
-      try { msg = JSON.parse(text).msg || msg } catch (e) { /* 原样兜底 */ }
+      try { msg = errorMessage(JSON.parse(text), msg) } catch (e) { /* 原样兜底 */ }
       throw new Error(msg)
     }
     const reader = res.body.getReader()
@@ -106,7 +115,7 @@ export function uploadFiles(files, onProgress) {
       let payload
       try { payload = JSON.parse(xhr.responseText) } catch (e) { return reject(new Error('服务返回无法解析')) }
       if (xhr.status !== 200 || String(payload.code) !== '200') {
-        return reject(new Error(payload.msg || '上传失败（HTTP ' + xhr.status + '）'))
+        return reject(new Error(errorMessage(payload, '上传失败（HTTP ' + xhr.status + '）')))
       }
       const message = typeof payload.data === 'string' && payload.data ? payload.data : '上传完成'
       resolve({ ok: true, message })
