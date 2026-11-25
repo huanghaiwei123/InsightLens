@@ -25,12 +25,30 @@ npm run dev        # http://localhost:5173，/personal 自动代理到后端
 | `VITE_API_BASE` | 接口基址。Web 形态留空走同源相对路径；Electron 形态填 `http://127.0.0.1:<后端端口>` | 空 |
 | `VITE_OUT_DIR` | 构建输出目录。Electron 形态可改成 `../dist-electron` 再交给主进程 | `../src/main/resources/static` |
 
-Electron 打包思路（后续）：主进程用 jlink 裁剪 JRE 启动后端 jar，渲染进程 `loadFile` 加载本工程产物，
-通过 `VITE_API_BASE` 指向主进程启动的后端端口。
+## Electron 运行
+
+```bash
+cd frontend
+npm install          # 首次会安装 electron
+npm run build        # 先产出 ../src/main/resources/static
+mvnw -f ..\\pom.xml package   # 生成 target/InsightLens-0.0.1-SNAPSHOT.jar
+npm run electron
+```
+
+主进程会启动后端 jar（用 `app.getPath('userData')` 作为 `-Dinsightlens.home`），
+等 `/personal/config` 通了之后直接 `loadURL('http://127.0.0.1:8080')`——静态页面本来就由后端托管，
+不需要 `VITE_API_BASE`。`preload.cjs` 只暴露 `openFile` / `showItemInFolder`，且限制路径必须在工作区内。
 
 ## 接口
 
-见桌面文档 `InsightLens_API_前端对接文档.md`。契约要点：
-- 统一返回 `{ code, msg, data }`，`code === "200"` 才算成功
-- 对话是 SSE，必须用 POST + fetch ReadableStream 逐帧读，不能用 EventSource
-- 上传是 multipart，字段名 `excel`，可多文件，返回结构化结果
+统一返回 `{ code, msg, data }`，`code === "200"` 才算成功：
+
+| 接口 | 用途 |
+|------|------|
+| `GET /personal/report/categories` | 分类 → 文件 → sheet 树，文件节点含 `uploadId`、`origName`、`filePath` |
+| `GET /personal/config` | `workspaceRoot`，Electron 拼本地绝对路径用 |
+| `GET /personal/file?uploadId=...` | 按 uploadId 流式下载 Excel（浏览器形态） |
+| `POST /personal/chat/stream` | SSE，必须用 POST + fetch ReadableStream，不能用 EventSource |
+| `POST /personal/upload` | multipart，字段名 `excel`，可多文件 |
+
+报表页点文件名：有 Electron 桥时用系统应用打开本地文件；否则新开窗口走下载接口。
