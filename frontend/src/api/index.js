@@ -38,6 +38,21 @@ export function fetchConfig() {
   return fetch(PREFIX + '/config').then(unwrap)
 }
 
+/** 报表里点文件名：浏览器形态直接走后端流式下载。 */
+export function excelDownloadUrl(uploadId) {
+  return PREFIX + '/file?uploadId=' + encodeURIComponent(uploadId)
+}
+
+/**
+ * Electron 形态调用主进程用系统应用打开本地 Excel。
+ * 返回 null 表示当前不是 Electron 环境，调用方应回退到浏览器下载。
+ */
+export function openLocalExcel(absPath) {
+  const bridge = window.electronAPI
+  if (!bridge || typeof bridge.openFile !== 'function') return null
+  return bridge.openFile(absPath)
+}
+
 /**
  * 流式对话：SSE 逐 token 返回，不能用 EventSource（后端要求 POST）。
  * onToken(text) 每帧回调，onNode(node) 节点开始，onDone() 结束，onError(msg) 出错。
