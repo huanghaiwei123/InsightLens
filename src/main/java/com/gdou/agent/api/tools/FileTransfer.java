@@ -8,8 +8,6 @@ public record FileTransfer(
         @JsonProperty("from")
         String from,
         @JsonProperty("to")
-        String to,
-        @JsonProperty("uuid")
-        String uuid
+        String to
 ) {
 }

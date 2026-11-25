@@ -28,6 +28,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -36,6 +39,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.stream.Stream;
 
 @Service
 @Slf4j
@@ -63,9 +67,11 @@ public class UploadServiceImpl implements UploadService {
 
     private Path temp;
 
+    private Path root;
+
     @PostConstruct
     private void init() {
-        Path root = Path.of(workSpace);
+        root = Path.of(workSpace);
         try {
             Files.createDirectories(root);
             temp = Files.createTempDirectory(root,"temp");
@@ -74,63 +80,56 @@ public class UploadServiceImpl implements UploadService {
         }
     }
 
-    @Override
-    public void upload(List<MultipartFile> excels) {
-        log.info("正在为您拼命解析用户上传的文件");
-        excels.forEach(s-> {
-            try {
-                Files.copy(s.getInputStream(),temp, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        });
-        Map<String,Object> allFile = analysisExcels(excels);
-        List<Message> messages = List.of(
-                new SystemMessage(prompt("message/UploadMessage.txt")),
-                new UserMessage(
-                        "用户上传的文件的信息是" + allFile
-                                +"|"+"临时目录相对于工作目录的地址是"+Path.of(workSpace).relativize(temp)
-                                + "|"
-                                + folderTool.listFolder()
-                )
-        );
-        String answer = llmClient.call(messages);
-        afterLLmCall(answer);
-        log.info("执行完成");
-    }
-
     /**
-     * 解析获得excel相关数据
+     * 用户上传的文件名添加uuid后缀
      * @param excels
      * @return
      */
-    private Map<String,Object> analysisExcels(List<MultipartFile> excels) {
-        Map<String,Object> allFile = new LinkedHashMap<>();
-
-        int count = 0;
-        for (MultipartFile file : excels) {
-            count++;
-            var singleFile = new LinkedHashMap<String,Map<String,Map<String, String>>>();
-            String fileName = file.getOriginalFilename();
-            String uuid = UUID.randomUUID().toString().substring(0, 8);
-            ExcelDataListener listener = new ExcelDataListener(fileViewService, uuid);
-            try(InputStream in = file.getInputStream();
-                ExcelReader reader = FesodSheet.read(in).build()){
-                List<ReadSheet> sheets = reader.excelExecutor().sheetList();
-                log.info("文件{}中一共包含了{}个sheet，正在进行进一步解析", fileName, sheets.size());
-                List<String> sheetName = sheets.stream().map(ReadSheet::getSheetName).toList();
-                for (String name : sheetName) {
-                    FesodSheet.read(in,listener).sheet(name).doRead();
-                    Map<String, Map<String, String>> data = listener.getData();
-                    listener.removeData();
-                    singleFile.put(name,data);
+    @Override
+    public String upload(List<MultipartFile> excels) {
+        log.info("正在为您拼命解析用户上传的文件");
+        List<String> paths = new LinkedList<>();
+        try {
+            excels.forEach(s -> {
+                try {
+                    String fileName = "%s_%s.xlsx".formatted(Objects.requireNonNull(s.getOriginalFilename(),"不知名文件.xlsx").substring(0, s.getOriginalFilename().lastIndexOf(".")), UUID.randomUUID().toString().substring(0, 8));
+                    s.transferTo(temp.resolve(fileName).toFile());
+                    paths.add(temp.resolve(fileName).toFile().getAbsolutePath());
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
                 }
-            } catch (IOException e) {
-                log.error("文件{}解析失败，请检查原因:{}",fileName,e.getMessage());
-                throw new RuntimeException(e);
+            });
+            Map<String, Object> allFile = analysisExcels(paths);
+            List<Message> messages = List.of(
+                    new SystemMessage(prompt("message/UploadMessage.txt")),
+                    new UserMessage(
+                            "用户上传的文件的信息是" + allFile
+                                    + "|" + "临时目录相对于工作目录的地址是" + Path.of(workSpace).relativize(temp)
+                                    + "|"
+                                    + folderTool.listFolder()
+                    )
+            );
+            String answer = llmClient.call(messages);
+            afterLLmCall(answer);
+            log.info("执行完成");
+        }catch (Exception e){
+            return "文件上传失败，如频繁遇到该问题请联系管理员解决这个问题";
+        }
+        return "文件上传完毕，已为您解析好数据";
+    }
+
+    private Map<String,Object> analysisExcels(List<String> paths) {
+        Map<String,Object> allFile = new LinkedHashMap<>();
+        for (String path : paths) {
+            String uuid = path.substring(path.lastIndexOf("_") + 1, path.lastIndexOf("."));
+            String fileName = path.substring(path.lastIndexOf(File.separator));
+            ExcelDataListener listener = new ExcelDataListener(fileViewService,uuid);
+            try(ExcelReader reader = FesodSheet.read(path).registerReadListener(listener).build()){
+                List<ReadSheet> sheets = reader.excelExecutor().sheetList();
+                reader.read(sheets);
+                Map<String, Map<String, String>> data = listener.getData();
+                allFile.put(fileName, data);
             }
-            allFile.put(fileName,singleFile);
-            log.info("文件{}解析成功,还剩{}个文件", fileName,excels.size()-count);
         }
         return allFile;
     }
@@ -170,7 +169,7 @@ public class UploadServiceImpl implements UploadService {
                     }
                     Integer categoryId = category.getId();
                     LambdaUpdateWrapper<FileView> viewWrapper = new LambdaUpdateWrapper<>();
-                    viewWrapper.eq(FileView::getUploadId,transfer.uuid()).set(FileView::getCategoryId,categoryId).set(FileView::getFilePath,transfer.to()+"/"+transfer.fileName());
+                    viewWrapper.eq(FileView::getOrigName,transfer.fileName()).set(FileView::getCategoryId,categoryId).set(FileView::getFilePath,transfer.to()+"/"+transfer.fileName());
                     fileViewService.update(viewWrapper);
                 }
             }

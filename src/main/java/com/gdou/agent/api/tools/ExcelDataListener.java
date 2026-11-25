@@ -8,8 +8,6 @@ import org.apache.fesod.sheet.context.AnalysisContext;
 import org.apache.fesod.sheet.event.AnalysisEventListener;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
-import java.util.LinkedList;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -17,6 +15,10 @@ import java.util.Map;
  */
 @Slf4j
 public class ExcelDataListener extends AnalysisEventListener<Map<Integer,String>> {
+
+    /**
+     * sheetName为key，单行数据为value，一个data存放单个文件所有sheet数据
+     */
     @Getter
     private final Map<String,Map<String,String>> data = new LinkedHashMap<>();
 
@@ -38,14 +40,15 @@ public class ExcelDataListener extends AnalysisEventListener<Map<Integer,String>
 
     @Override
     public void invoke(Map<Integer, String> integerStringMap, AnalysisContext ctx) {
+        String sheetName = ctx.readSheetHolder().getReadSheet().getSheetName();
         LinkedHashMap<String, String> map = new LinkedHashMap<>();
         integerStringMap.forEach(
                 (index,value)->{
                     String head = headMap.getOrDefault(index,"未知列");
-                    map.put(head, value);
+                    map.putIfAbsent(head, value);
                 }
         );
-        data.put(uuid, map);
+        data.putIfAbsent(sheetName, map);
     }
 
     @Override
