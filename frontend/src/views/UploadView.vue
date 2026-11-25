@@ -53,11 +53,6 @@ async function submit() {
   percent.value = 0
   try {
     const r = await uploadFiles(files.value, (p) => { percent.value = p })
-    if (!r.ok) {
-      error.value = r.message
-      toast('上传失败：' + r.message)
-      return
-    }
     result.value = r
     files.value = []
     toast('上传完成')
