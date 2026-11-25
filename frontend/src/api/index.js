@@ -31,10 +31,10 @@ export function fetchConfig() {
 
 /**
  * 流式对话：SSE 逐 token 返回，不能用 EventSource（后端要求 POST）。
- * onToken(text) 每帧回调，onDone() 结束，onError(msg) 出错。
+ * onToken(text) 每帧回调，onNode(node) 节点开始，onDone() 结束，onError(msg) 出错。
  * 返回 abort 函数供取消。
  */
-export function chatStream(userMsg, sessionId, { onToken, onDone, onError } = {}) {
+export function chatStream(userMsg, sessionId, { onToken, onNode, onDone, onError } = {}) {
   const controller = new AbortController()
   const url = PREFIX + '/chat/stream?userMsg=' + encodeURIComponent(userMsg)
       + '&sessionId=' + encodeURIComponent(sessionId)
@@ -71,8 +71,11 @@ export function chatStream(userMsg, sessionId, { onToken, onDone, onError } = {}
         if (!event && !data) continue
         let obj = {}
         try { obj = JSON.parse(data) } catch (e) { /* 忽略坏帧 */ }
-        if (event === 'token' && obj.text) onToken && onToken(obj.text)
-        else if (event === 'error') onError && onError(obj.msg || '处理出错')
+        // 后端帧统一带 type 字段，同时 SSE 的 event: 名也一致；两种都认，兼容解析差异
+        const kind = event || obj.type
+        if (kind === 'token' && obj.text) onToken && onToken(obj.text)
+        else if (kind === 'node-start' && obj.node) onNode && onNode(obj.node)
+        else if (kind === 'error') onError && onError(obj.message || obj.msg || '处理出错')
       }
     }
     onDone && onDone()
@@ -86,7 +89,11 @@ export function chatStream(userMsg, sessionId, { onToken, onDone, onError } = {}
 
 /**
  * 上传 Excel：multipart/form-data，字段名 excel，可多文件。
- * 返回 UploadResultVO。
+ *
+ * 后端 /upload 的 code 不用于区分成败（成功/失败都返回同一个业务码），
+ * 真实结果在 data 字符串里（"…解析好数据" / "…上传失败…"）。
+ * 这里按 HTTP 状态判断请求是否到达，再按 data 文案归一成 { ok, message }，
+ * 这样无论后端业务码怎么调整都不受影响。
  */
 export function uploadFiles(files, onProgress) {
   const form = new FormData()
@@ -100,8 +107,10 @@ export function uploadFiles(files, onProgress) {
     xhr.onload = () => {
       let payload
       try { payload = JSON.parse(xhr.responseText) } catch (e) { return reject(new Error('服务返回无法解析')) }
-      if (xhr.status === 200 && String(payload.code) === '200') resolve(payload.data)
-      else reject(new Error(payload.msg || '上传失败（HTTP ' + xhr.status + '）'))
+      if (xhr.status !== 200) return reject(new Error(payload.msg || '上传失败（HTTP ' + xhr.status + '）'))
+      const message = typeof payload.data === 'string' ? payload.data : ''
+      const ok = /完毕|成功/.test(message)
+      resolve({ ok, message: message || (ok ? '上传完成' : '上传未完成') })
     }
     xhr.onerror = () => reject(new Error('网络连接失败'))
     xhr.send(form)

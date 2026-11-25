@@ -38,6 +38,10 @@ async function send() {
         botMsg.text += t
         scrollBottom()
       },
+      onNode: (node) => {
+        const label = NODE_LABEL[node] || '处理中'
+        if (botMsg.trace[botMsg.trace.length - 1] !== label) botMsg.trace.push(label)
+      },
       onDone: () => { streaming.value = false },
       onError: (m) => {
         streaming.value = false

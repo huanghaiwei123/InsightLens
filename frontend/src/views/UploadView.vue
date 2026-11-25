@@ -52,9 +52,15 @@ async function submit() {
   result.value = null
   percent.value = 0
   try {
-    result.value = await uploadFiles(files.value, (p) => { percent.value = p })
+    const r = await uploadFiles(files.value, (p) => { percent.value = p })
+    if (!r.ok) {
+      error.value = r.message
+      toast('上传失败：' + r.message)
+      return
+    }
+    result.value = r
     files.value = []
-    toast('上传完成，已归类 ' + result.value.fileCount + ' 个文件')
+    toast('上传完成')
   } catch (e) {
     error.value = e.message
     toast('上传失败：' + e.message)
@@ -101,13 +107,8 @@ async function submit() {
         <div v-if="error" class="alert err" style="margin-top:16px">{{ error }}</div>
 
         <div v-if="result" class="alert ok" style="margin-top:16px">
-          <b>上传完成</b>：{{ result.fileCount }} 个文件、{{ result.sheetCount }} 个工作表、{{ result.totalRows }} 行数据。
-          <div style="margin-top:8px">
-            <div v-for="f in result.files" :key="f.uuid" class="small" style="margin:4px 0">
-              · {{ f.fileName }} → <span class="tag terra">{{ f.category }}</span>
-              <span class="muted">（{{ f.sheets.join('、') }}，{{ f.rows }} 行）</span>
-            </div>
-          </div>
+          <b>上传完成</b>：{{ result.message }}
+          <div class="small" style="margin-top:8px">文件已按业务归类，可到「数据报表」查看分类与工作表清单。</div>
         </div>
       </div>
 
@@ -118,7 +119,7 @@ async function submit() {
           {{ workspaceRoot || '正在读取文件目录…' }}
         </div>
         <p class="desc" style="margin-top:14px">
-          每个文件有一个编号，多个工作表共用一个编号。系统会据此把分类和路径写回登记表，同名文件之间不会互相串改。
+          系统会自动给文件加上唯一后缀再归类，同名文件也不会互相覆盖。上传后到「数据报表」即可查看分类结果。
         </p>
       </div>
     </div>
