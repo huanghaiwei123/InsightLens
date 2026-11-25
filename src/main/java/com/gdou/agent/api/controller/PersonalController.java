@@ -110,9 +110,8 @@ public class PersonalController {
     @PostMapping("/upload")
     public Result upload(@RequestParam("excel") List<MultipartFile> excels) {
         log.warn("用户正在上传{}个文件，正在处理", excels.size());
-        uploadService.upload(excels);
         return Result.success(CodeConstant.CALL_ERROR, MsgConstant.CALL_ERROR,
-                "Excel 上传管道尚未实现，请稍后再试");
+                uploadService.upload(excels));
     }
 
 //    /**
