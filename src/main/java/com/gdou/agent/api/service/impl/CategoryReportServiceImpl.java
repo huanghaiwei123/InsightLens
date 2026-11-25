@@ -78,6 +78,7 @@ public class CategoryReportServiceImpl implements CategoryReportService {
                 file = FileReportVO.builder()
                         .uploadId(view.getUploadId())
                         .origName(view.getOrigName())
+                        .filePath(view.getFilePath())
                         .createdAt(view.getCreatedAt())
                         .sheets(new ArrayList<>())
                         .build();

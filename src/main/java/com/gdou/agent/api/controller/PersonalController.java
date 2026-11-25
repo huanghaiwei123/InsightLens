@@ -7,6 +7,7 @@ import com.gdou.agent.api.constant.CodeConstant;
 import com.gdou.agent.api.constant.MsgConstant;
 import com.gdou.agent.api.holder.SessionHolder;
 import com.gdou.agent.api.service.CategoryReportService;
+import com.gdou.agent.api.service.FileDownloadService;
 import com.gdou.agent.api.service.SessionService;
 import com.gdou.agent.api.service.UploadService;
 import com.gdou.agent.infra.stream.SseStreamSink;
@@ -24,7 +25,12 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import jakarta.servlet.http.HttpServletResponse;
 
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +60,9 @@ public class PersonalController {
 
     @Autowired
     private CategoryReportService categoryReportService;
+
+    @Autowired
+    private FileDownloadService fileDownloadService;
 
     @Autowired
     private ReActAgentRunner reactAgentRunner;
@@ -100,6 +109,21 @@ public class PersonalController {
     public Result config() {
         return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS,
                 Map.of("workspaceRoot", categoryReportService.workspaceRoot()));
+    }
+
+    /**
+     * 下载报表里点击的 Excel：只接受 file_view 登记过的 uploadId，
+     * 路径越界或文件被移动时由 FileDownloadService 抛业务异常，统一走全局异常兜底。
+     */
+    @GetMapping("/file")
+    public void downloadFile(@RequestParam String uploadId, HttpServletResponse response) throws IOException {
+        FileDownloadService.DownloadFile file = fileDownloadService.resolve(uploadId);
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setHeader("Content-Disposition",
+                "attachment; filename*=UTF-8''" + URLEncoder.encode(file.fileName(), StandardCharsets.UTF_8));
+        response.setContentLengthLong(Files.size(file.path()));
+        Files.copy(file.path(), response.getOutputStream());
+        response.flushBuffer();
     }
 
     /**
