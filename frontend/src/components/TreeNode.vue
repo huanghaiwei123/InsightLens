@@ -1,6 +1,6 @@
 <script setup>
 import { computed, inject, ref } from 'vue'
-import { excelDownloadUrl, openLocalExcel } from '@/api'
+import { downloadExcel, openLocalExcel } from '@/api'
 
 const props = defineProps({
   node: { type: Object, required: true },
@@ -23,8 +23,12 @@ async function openFile(file) {
 
   const result = openLocalExcel(absPath)
   if (result === null) {
-    // 浏览器没有本地文件权限，改走后端流式下载
-    window.open(excelDownloadUrl(file.uploadId), '_blank')
+    // 浏览器没有本地文件权限，改走后端流式下载；失败时用 toast 显示业务原因
+    try {
+      await downloadExcel(file.uploadId, file.origName)
+    } catch (e) {
+      toast('打开失败：' + e.message)
+    }
     return
   }
   try {

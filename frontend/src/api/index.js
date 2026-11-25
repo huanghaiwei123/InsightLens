@@ -44,6 +44,30 @@ export function excelDownloadUrl(uploadId) {
 }
 
 /**
+ * 下载 Excel：成功时触发浏览器保存；失败时后端返回 Result JSON，
+ * 这里解析成 Error，避免用户看到一页JSON而不是错误提示。
+ */
+export function downloadExcel(uploadId, fileName) {
+  return fetch(excelDownloadUrl(uploadId)).then(async (res) => {
+    const contentType = res.headers.get('content-type') || ''
+    if (!res.ok || contentType.indexOf('application/json') !== -1) {
+      let payload = {}
+      try { payload = await res.json() } catch (e) { /* 原样兜底 */ }
+      throw new Error(errorMessage(payload, '下载失败（HTTP ' + res.status + '）'))
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName || 'excel.xlsx'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  })
+}
+
+/**
  * Electron 形态调用主进程用系统应用打开本地 Excel。
  * 返回 null 表示当前不是 Electron 环境，调用方应回退到浏览器下载。
  */
