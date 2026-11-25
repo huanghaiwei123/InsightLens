@@ -75,6 +75,21 @@ class FileDownloadServiceImplTest {
     }
 
     @Test
+    @DisplayName("评测伪路径 eval://：抛业务异常，不漏到兜底异常处理器")
+    void rejectEvalPseudoPath() {
+        when(fileViewService.list(ArgumentMatchers.<Wrapper<FileView>>any())).thenReturn(List.of(FileView.builder()
+                .uploadId("eval_seed")
+                .origName("orders")
+                .filePath("eval://orders")
+                .build()));
+
+        assertThatThrownBy(() -> service.resolve("eval_seed"))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("评测数据")
+                .hasFieldOrPropertyWithValue("code", com.gdou.agent.api.constant.CodeConstant.CALL_ERROR);
+    }
+
+    @Test
     @DisplayName("文件被移走：业务异常提示已不在原位置")
     void rejectMissingFile() {
         when(fileViewService.list(ArgumentMatchers.<Wrapper<FileView>>any())).thenReturn(List.of(FileView.builder()

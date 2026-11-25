@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -40,10 +41,19 @@ public class FileDownloadServiceImpl implements FileDownloadService {
         if (relative == null || relative.isBlank()) {
             throw new BusinessException(CodeConstant.CALL_ERROR, "文件尚未归类，无法打开");
         }
+        // 评测数据只有元数据，没有真实 Excel；不让伪协议路径漏到兜底异常处理器
+        if (relative.startsWith("eval://")) {
+            throw new BusinessException(CodeConstant.CALL_ERROR, "评测数据没有对应的 Excel 文件，无法打开");
+        }
 
         Path root = Path.of(workSpace).toAbsolutePath().normalize();
-        Path target = root.resolve(relative.replace('\\', '/')).normalize();
-        if (!target.startsWith(root) || !Files.isRegularFile(target)) {
+        Path target;
+        try {
+            target = root.resolve(relative.replace('\\', '/')).normalize();
+        } catch (InvalidPathException e) {
+            throw new BusinessException(CodeConstant.CALL_ERROR, "文件路径无效，无法打开");
+        }
+        if (!target.startsWith(root) || !Files.isRegularFile(target) || !Files.isReadable(target)) {
             throw new BusinessException(CodeConstant.CALL_ERROR, "文件已不在原位置，无法打开");
         }
         String fileName = view.getOrigName() == null || view.getOrigName().isBlank()
