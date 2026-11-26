@@ -3,11 +3,13 @@ package com.gdou.agent.api.exception;
 import com.gdou.agent.api.constant.CodeConstant;
 import com.gdou.agent.api.constant.MsgConstant;
 import org.junit.jupiter.api.DisplayName;
+import org.springframework.http.HttpMethod;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -38,6 +40,11 @@ class ExceptionHandleTest {
         @GetMapping("/probe/unexpected")
         String unexpected() {
             throw new IllegalStateException("unexpected boom");
+        }
+
+        @GetMapping("/probe/no-resource")
+        String noResource() throws NoResourceFoundException {
+            throw new NoResourceFoundException(HttpMethod.GET, "/favicon.ico");
         }
     }
 
@@ -72,6 +79,13 @@ class ExceptionHandleTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(CodeConstant.CALL_ERROR))
                 .andExpect(content().string(not(containsString("unexpected boom"))));
+    }
+
+    @Test
+    @DisplayName("静态资源缺失：返回 404，不再走兜底生成 Result 错误体")
+    void noResourceFoundDoesNotUseFallback() throws Exception {
+        mvc.perform(get("/probe/no-resource"))
+                .andExpect(status().isNotFound());
     }
 
     @Test

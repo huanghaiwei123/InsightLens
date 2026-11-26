@@ -4,8 +4,11 @@ import com.gdou.agent.api.common.Result;
 import com.gdou.agent.api.constant.CodeConstant;
 import com.gdou.agent.api.constant.MsgConstant;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常兜底：把异常收敛成与成功响应同构的 Result，前端只需按 code 分支。
@@ -29,6 +32,16 @@ public class ExceptionHandle {
         log.warn("[exception] 业务异常 code={}, message={}", code, e.getMessage());
         Object data = e.getCode() == null ? null : e.getMessage();
         return Result.error(code, MsgConstant.CALL_ERROR, data);
+    }
+
+    /**
+     * 静态资源缺失（最常见是浏览器自动请求 /favicon.ico）属于正常 404，不是服务端故障。
+     * 单独接住，避免被下面的兜底记成 ERROR + 完整堆栈，污染对话故障排查时的日志。
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public void handleNoResourceFound(NoResourceFoundException e) {
+        log.debug("[exception] 静态资源不存在: {}", e.getMessage());
     }
 
     /**
