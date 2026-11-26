@@ -226,7 +226,7 @@ public class PersonalController {
                     SessionHolder.set(session.getId());
                     SessionHolder.setCategory(session.getCategoryId());
                     // 用户原话在入口线程池落库：与是否触发 query 工具无关，纯闲聊也记一条
-                    saveUserMessage(session.getId(), userMsg);
+                    saveMessage(session.getId(), userMsg, "user");
                     RunContext ctx = new RunContext(traceId, sink);
                     StringBuilder answer = new StringBuilder();
                     reactAgentRunner.run(userMsg, ctx)
@@ -241,6 +241,9 @@ public class PersonalController {
                                     }
                                 }
                             }).blockLast();
+                    // 模型最终文本作为 assistant 落库：回答与澄清提问都走 AGENT_MODEL_STREAMING，
+                    // 两条路径都会 accumulate 到 answer，落一条即可覆盖「回答或提问」。
+                    saveMessage(session.getId(), answer.toString(), "assistant");
                     sink.done();
                     log.info("[chat/stream] <<< 完成 traceId={}, cost={}ms",
                             traceId, System.currentTimeMillis() - start);
@@ -264,20 +267,20 @@ public class PersonalController {
     }
 
     /**
-     * 把用户原话落到 message 表。当前只记 user 一条：
-     * 工具调用过程与 assistant 回答暂不落库，避免把内部推理原文写进对话历史。
-     * content 是 NOT NULL，空白问题直接跳过。
+     * 把一轮对话的角色消息落到 message 表：入口落 user 原话，模型收口后落 assistant 文本。
+     * 工具调用与 system 提示词不落库——前者 trace_span 已有记录，后者是内部提示词资产。
+     * content 是 NOT NULL，空白内容直接跳过。
      */
-    private void saveUserMessage(Integer sessionId, String userMsg) {
-        if (userMsg == null || userMsg.isBlank()) return;
+    private void saveMessage(Integer sessionId, String content, String role) {
+        if (content == null || content.isBlank()) return;
         com.gdou.agent.meta.entity.Message row = com.gdou.agent.meta.entity.Message.builder()
                 .sessionId(sessionId)
-                .content(userMsg)
-                .role("user")
+                .content(content)
+                .role(role)
                 .createdAt(LocalDateTime.now())
                 .build();
         if (!messageService.save(row)) {
-            log.error("[chat/stream] 用户消息落库失败 sessionId={}", sessionId);
+            log.error("[chat/stream] 消息落库失败 sessionId={}, role={}", sessionId, role);
         }
     }
 

@@ -15,8 +15,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 用户消息落库：入口线程池只记 user 一条，工具过程与 assistant 回答暂不入库。
- * saveUserMessage 是私有方法，按项目惯例用 ReflectionTestUtils 直接调用。
+ * 对话消息落库：入口记 user 原话，模型收口后记 assistant 文本。
+ * 工具调用与 system 提示词不落库。saveMessage 是私有方法，用 ReflectionTestUtils 直接调用。
  */
 class PersonalControllerMessageTest {
 
@@ -33,7 +33,7 @@ class PersonalControllerMessageTest {
         when(service.save(any(Message.class))).thenReturn(true);
         PersonalController controller = controllerWith(service);
 
-        ReflectionTestUtils.invokeMethod(controller, "saveUserMessage", 7, "上周各品类退款率");
+        ReflectionTestUtils.invokeMethod(controller, "saveMessage", 7, "上周各品类退款率", "user");
 
         ArgumentCaptor<Message> captor = ArgumentCaptor.forClass(Message.class);
         verify(service).save(captor.capture());
@@ -45,13 +45,29 @@ class PersonalControllerMessageTest {
     }
 
     @Test
-    @DisplayName("空白问题不落库：message.content 是 NOT NULL")
-    void saveUserMessageSkipsBlank() {
+    @DisplayName("模型文本落库：澄清提问与最终回答都按 assistant 角色记一条")
+    void saveAssistantMessage() {
+        MessageService service = mock(MessageService.class);
+        when(service.save(any(Message.class))).thenReturn(true);
+        PersonalController controller = controllerWith(service);
+
+        ReflectionTestUtils.invokeMethod(controller, "saveMessage", 7, "「这次」指哪次考试？", "assistant");
+
+        ArgumentCaptor<Message> captor = ArgumentCaptor.forClass(Message.class);
+        verify(service).save(captor.capture());
+        assertThat(captor.getValue().getRole()).isEqualTo("assistant");
+        assertThat(captor.getValue().getContent()).isEqualTo("「这次」指哪次考试？");
+    }
+
+    @Test
+    @DisplayName("空白内容不落库：message.content 是 NOT NULL")
+    void saveMessageSkipsBlank() {
         MessageService service = mock(MessageService.class);
         PersonalController controller = controllerWith(service);
 
-        ReflectionTestUtils.invokeMethod(controller, "saveUserMessage", 7, "   ");
-        ReflectionTestUtils.invokeMethod(controller, "saveUserMessage", 7, null);
+        ReflectionTestUtils.invokeMethod(controller, "saveMessage", 7, "   ", "user");
+        ReflectionTestUtils.invokeMethod(controller, "saveMessage", 7, null, "assistant");
+        ReflectionTestUtils.invokeMethod(controller, "saveMessage", 7, "", "assistant");
 
         verify(service, never()).save(any(Message.class));
     }
