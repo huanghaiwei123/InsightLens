@@ -5,7 +5,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gdou.agent.api.holder.SessionHolder;
-import com.gdou.agent.api.service.MessageService;
 import com.gdou.agent.infra.LlmClient;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
@@ -26,7 +25,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -43,8 +41,6 @@ public class ClarifyNode implements Node {
     private ObjectMapper objectMapper;
     @Autowired
     private JdbcTemplate jdbc;
-    @Autowired
-    private MessageService messageService;
 
     /**
      * 相对时间换算的基准日。生产留空走今天；评测时通过 -Dinsightlens.eval-base-date=2026-11-11
@@ -74,7 +70,6 @@ public class ClarifyNode implements Node {
                     + "不得自行改写，也不得就这些项向用户追问；把实际采用的定义逐条写进 assumptions。\n"
                     + "- 词典未定义的项才由你推断；相对时间换算结果若与词典边界不一致，以词典为准。";
         }
-        buildMessage(systemMessage, "system");
         String tables = tableList();
         // 标题与 ClarifyNode.txt 的「1. 输入」逐字对齐，第三列是行数不是列定义
         String userMessage = question + "\n\n候选表清单（文件名 | sheet 名 | 行数）：\n" + tables;
@@ -167,22 +162,6 @@ public class ClarifyNode implements Node {
         } catch (IOException e) {
             log.error("[clarify] 提示词读取失败 path={}", path, e);
             throw new RuntimeException(e);
-        }
-    }
-
-    public void buildMessage(String msg,String role){
-        Integer id = SessionHolder.get();
-        com.gdou.agent.meta.entity.Message message = com.gdou.agent.meta.entity.Message.builder()
-                .sessionId(id)
-                .content(msg)
-                .role(role)
-                .createdAt(LocalDateTime.now())
-                .build();
-        boolean save = messageService.save(message);
-        if (save) {
-            log.info("窗口{}对话信息落库成功,信息落库所得id:{}",id, message.getId());
-        }else{
-            log.error("窗口{}对话信息添加失败,请检查原因",id);
         }
     }
 }

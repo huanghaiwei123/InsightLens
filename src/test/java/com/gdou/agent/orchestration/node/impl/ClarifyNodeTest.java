@@ -1,7 +1,6 @@
 package com.gdou.agent.orchestration.node.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.gdou.agent.api.service.MessageService;
 import com.gdou.agent.infra.LlmClient;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.orchestration.AnalysisState;
@@ -47,12 +46,10 @@ class ClarifyNodeTest {
         llmClient = mock(LlmClient.class);
         jdbc = mock(JdbcTemplate.class);
         node = new ClarifyNode();
-        // 节点改成 @Autowired 字段注入后纯单测没有 Spring 容器，手动补齐依赖；
-        // MessageService 只需一个 mock，落库不是本测试要验的行为。
+        // 节点改成 @Autowired 字段注入后纯单测没有 Spring 容器，手动补齐依赖。
         ReflectionTestUtils.setField(node, "LlmClient", llmClient);
         ReflectionTestUtils.setField(node, "objectMapper", new ObjectMapper());
         ReflectionTestUtils.setField(node, "jdbc", jdbc);
-        ReflectionTestUtils.setField(node, "messageService", mock(MessageService.class));
         state = new AnalysisState();
         state.setQuestion("这次平均分怎么样");
         // 窗口未绑定分类 → 走不带 category_id 的查询；返回两行模拟 file_view
