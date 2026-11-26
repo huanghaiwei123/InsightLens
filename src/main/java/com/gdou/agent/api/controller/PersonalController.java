@@ -6,11 +6,14 @@ import com.gdou.agent.api.common.Result;
 import com.gdou.agent.api.constant.CodeConstant;
 import com.gdou.agent.api.constant.MsgConstant;
 import com.gdou.agent.api.holder.SessionHolder;
+import com.gdou.agent.infra.ApiKeyService;
 import com.gdou.agent.api.service.CategoryReportService;
 import com.gdou.agent.api.service.FileDownloadService;
 import com.gdou.agent.api.service.MessageService;
 import com.gdou.agent.api.service.SessionService;
 import com.gdou.agent.api.service.UploadService;
+import com.gdou.agent.api.vo.MessageVO;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.gdou.agent.infra.stream.SseStreamSink;
 import com.gdou.agent.meta.entity.Session;
 import com.gdou.agent.orchestration.GraphRunner;
@@ -33,6 +36,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executor;
@@ -71,6 +75,13 @@ public class PersonalController {
     @Autowired
     private ReActAgentRunner reactAgentRunner;
 
+    @Autowired
+    private ApiKeyService apiKeyService;
+
+    /** 请求体只接 apiKey；不接 baseUrl，避免误改后整站 404。 */
+    public record ApiKeyRequest(String apiKey) {
+    }
+
     /**
      * 用户新建会话窗口，可指定其绑定的大分类。
      * @param categoryId 大分类 id；不传则窗口不绑定分类，检索时不按分类过滤
@@ -96,6 +107,22 @@ public class PersonalController {
     }
 
     /**
+     * 按会话读历史消息，供前端切换分类/页面后回填对话。
+     * 只返回 user / assistant 两类正文，按创建时间升序；工具与 system 消息不落库也不会出现。
+     */
+    @GetMapping("/history")
+    public Result history(@RequestParam Integer sessionId) {
+        List<com.gdou.agent.meta.entity.Message> rows = messageService.list(
+                new LambdaQueryWrapper<com.gdou.agent.meta.entity.Message>()
+                        .eq(com.gdou.agent.meta.entity.Message::getSessionId, sessionId)
+                        .orderByAsc(com.gdou.agent.meta.entity.Message::getCreatedAt));
+        List<MessageVO> data = rows.stream()
+                .map(row -> MessageVO.builder().role(row.getRole()).text(row.getContent()).build())
+                .toList();
+        return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS, data);
+    }
+
+    /**
      * 分类报表：category → file(upload_id 去重) → sheet 三层树，供 Electron 客户端渲染。
      * 只查元数据表，不读 Excel 内容，也不触发任何模型调用。
      */
@@ -113,6 +140,25 @@ public class PersonalController {
     public Result config() {
         return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS,
                 Map.of("workspaceRoot", categoryReportService.workspaceRoot()));
+    }
+
+    /**
+     * 读取当前模型配置。只回显掩码后的 Key —— 明文只在服务端配置文件里，
+     * 前端不缓存、接口也不回传，避免 DevTools / 日志里泄露。
+     */
+    @GetMapping("/settings/api-key")
+    public Result apiKeySettings() {
+        return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS, apiKeyService.status());
+    }
+
+    /**
+     * 修改 API Key：落盘到 application-local.yaml 并热替换运行中的模型客户端，
+     * 用户无需重启。失败原因由 BusinessException 指定业务码，前端可直接回显。
+     */
+    @PutMapping("/settings/api-key")
+    public Result updateApiKey(@RequestBody ApiKeyRequest body) {
+        return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS,
+                apiKeyService.update(body == null ? null : body.apiKey()));
     }
 
     /**
@@ -225,11 +271,15 @@ public class PersonalController {
                 try {
                     SessionHolder.set(session.getId());
                     SessionHolder.setCategory(session.getCategoryId());
+                    // 澄清回答必须带历史：当前这句「春季期中」单独看不是问题，只有连同上一轮
+                    // 助手问的「这次指哪次考试」模型才知道在补全什么，从而直接查数作答。
+                    // 因此在落当前 user 消息之前先读历史，避免把本轮这条重复带进去。
+                    List<Message> history = recentMessages(session.getId());
                     // 用户原话在入口线程池落库：与是否触发 query 工具无关，纯闲聊也记一条
                     saveMessage(session.getId(), userMsg, "user");
                     RunContext ctx = new RunContext(traceId, sink);
                     StringBuilder answer = new StringBuilder();
-                    reactAgentRunner.run(userMsg, ctx)
+                    reactAgentRunner.run(userMsg, ctx, history)
                             .doOnNext(nodeOutput -> {
                                 if(nodeOutput instanceof StreamingOutput so && so.getOutputType() == OutputType.AGENT_MODEL_STREAMING){
                                     Message msg = so.message();
@@ -264,6 +314,35 @@ public class PersonalController {
                     traceId, userMsg, e.getClass().getSimpleName());
             throw e;
         }
+    }
+
+    /** 一轮对话最多带这么多历史消息进提示词，避免长会话把上下文撑爆 */
+    private static final int MAX_HISTORY = 12;
+
+    /**
+     * 读本会话最近若干轮 user / assistant 消息，转成 Spring AI 的 Message 供 ReAct 理解上下文。
+     * 只取 user/assistant——tool 与 system 从不落库，这里天然没有。
+     * 按创建时间升序返回（对话顺序），超出上限时只保留最新的 MAX_HISTORY 条。
+     */
+    private List<Message> recentMessages(Integer sessionId) {
+        List<com.gdou.agent.meta.entity.Message> rows = messageService.list(
+                new LambdaQueryWrapper<com.gdou.agent.meta.entity.Message>()
+                        .eq(com.gdou.agent.meta.entity.Message::getSessionId, sessionId)
+                        .in(com.gdou.agent.meta.entity.Message::getRole, "user", "assistant")
+                        .orderByDesc(com.gdou.agent.meta.entity.Message::getCreatedAt));
+        List<Message> result = new ArrayList<>();
+        // rows 按 createdAt 倒序（最新在前）：先取前 MAX_HISTORY 条即最新的，
+        // 再从后往前遍历反转成时间正序，模型看到的对话顺序才是对的。
+        int to = Math.min(rows.size(), MAX_HISTORY);
+        for (int i = to - 1; i >= 0; i--) {
+            com.gdou.agent.meta.entity.Message row = rows.get(i);
+            if ("assistant".equals(row.getRole())) {
+                result.add(new AssistantMessage(row.getContent()));
+            } else {
+                result.add(new org.springframework.ai.chat.messages.UserMessage(row.getContent()));
+            }
+        }
+        return result;
     }
 
     /**

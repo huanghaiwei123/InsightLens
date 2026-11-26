@@ -1,11 +1,18 @@
 package com.gdou.agent.api.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.gdou.agent.api.common.Result;
 import com.gdou.agent.api.service.MessageService;
+import com.gdou.agent.api.vo.MessageVO;
 import com.gdou.agent.meta.entity.Message;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -70,5 +77,49 @@ class PersonalControllerMessageTest {
         ReflectionTestUtils.invokeMethod(controller, "saveMessage", 7, "", "assistant");
 
         verify(service, never()).save(any(Message.class));
+    }
+
+    @Test
+    @DisplayName("读历史：按 sessionId 查出的消息转成 role/text，顺序交给 SQL 的 createdAt 升序")
+    void historyReturnsRoleAndText() {
+        MessageService service = mock(MessageService.class);
+        PersonalController controller = controllerWith(service);
+        when(service.list(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                Message.builder().role("user").content("上周退款率").build(),
+                Message.builder().role("assistant").content("上周退款率是 12%").build()
+        ));
+
+        Result result = controller.history(7);
+
+        assertThat(result.data).isInstanceOf(List.class);
+        @SuppressWarnings("unchecked")
+        List<MessageVO> data = (List<MessageVO>) result.data;
+        assertThat(data).extracting(MessageVO::getRole).containsExactly("user", "assistant");
+        assertThat(data).extracting(MessageVO::getText)
+                .containsExactly("上周退款率", "上周退款率是 12%");
+    }
+
+    @Test
+    @DisplayName("recentMessages：时间倒序读取后反转成正序，且只保留最新 12 条")
+    void recentMessagesAreChronologicalAndCapped() {
+        MessageService service = mock(MessageService.class);
+        PersonalController controller = controllerWith(service);
+        // 模拟 messageService 按 createdAt 倒序返回 14 条
+        List<Message> desc = new ArrayList<>();
+        for (int i = 14; i >= 1; i--) {
+            desc.add(Message.builder().role(i % 2 == 0 ? "user" : "assistant")
+                    .content("第" + i + "条").createdAt(LocalDateTime.of(2026, 11, 26, 0, 0).plusMinutes(i)).build());
+        }
+        when(service.list(any(LambdaQueryWrapper.class))).thenReturn(desc);
+
+        @SuppressWarnings("unchecked")
+        List<org.springframework.ai.chat.messages.Message> history =
+                (List<org.springframework.ai.chat.messages.Message>)
+                        ReflectionTestUtils.invokeMethod(controller, "recentMessages", 7);
+
+        // 上限 12 条，丢弃最旧的「第1条」「第2条」，剩下 3..14 按时间正序
+        assertThat(history).hasSize(12);
+        assertThat(history.get(0).getText()).isEqualTo("第3条");
+        assertThat(history.get(11).getText()).isEqualTo("第14条");
     }
 }

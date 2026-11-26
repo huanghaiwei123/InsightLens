@@ -38,6 +38,25 @@ export function fetchConfig() {
   return fetch(PREFIX + '/config').then(unwrap)
 }
 
+/** 读取模型配置：apiKey 是掩码后的字符串，明文不会下发到前端。 */
+export function fetchApiKeySettings() {
+  return fetch(PREFIX + '/settings/api-key').then(unwrap)
+}
+
+/** 修改 API Key：保存后立即生效，不需要重启后端。 */
+export function saveApiKey(apiKey) {
+  return fetch(PREFIX + '/settings/api-key', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ apiKey })
+  }).then(unwrap)
+}
+
+/** 按会话读历史消息：返回 [{role:'user'|'assistant', text}]，按时间升序 */
+export function fetchHistory(sessionId) {
+  return fetch(PREFIX + '/history?sessionId=' + encodeURIComponent(sessionId)).then(unwrap)
+}
+
 /** 报表里点文件名：浏览器形态直接走后端流式下载。 */
 export function excelDownloadUrl(uploadId) {
   return PREFIX + '/file?uploadId=' + encodeURIComponent(uploadId)

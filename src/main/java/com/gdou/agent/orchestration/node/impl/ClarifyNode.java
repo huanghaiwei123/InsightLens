@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -54,10 +55,12 @@ public class ClarifyNode implements Node {
         long start = System.currentTimeMillis();
         String question = state.getQuestion();
         // 相对时间需要锚点：把基准日期拼进 SystemMessage，不碰 userMessage（原始问题仍是第一行）
+        // 生产环境默认北京时间（Asia/Shanghai），评测用 -Dinsightlens.eval-base-date 注入固定值
         String baseDate = (evalBaseDate == null || evalBaseDate.isBlank())
-                ? LocalDate.now().toString() : evalBaseDate.trim();
+                ? LocalDate.now(ZoneId.of("Asia/Shanghai")).toString() : evalBaseDate.trim();
         String systemMessage = prompt("message/ClarifyNode.txt")
-                + "\n\n## 当前日期\n" + baseDate
+                + "\n\n## 当前日期与时区\n今天是 " + baseDate + "。系统默认时区为北京时间（Asia/Shanghai, UTC+8），"
+                + "用户未指明时区的时间问题一律按北京时间理解。"
                 + "\n问题里的「今天 / 上周 / 近 30 天 / 今年」等相对时间，一律以该日期为基准换算成具体起止日期，"
                 + "并写进 clarified_question 与 assumptions 两处。";
         // 口径词典只存在库表注释里，澄清阶段看不到它就会自行猜指标算法并写进 assumptions，
