@@ -1,87 +1,266 @@
 <script setup>
-import { ref, inject, onMounted, computed } from 'vue'
-import { fetchConfig, fetchReport } from '@/api'
-import CategoryCard from '@/components/CategoryCard.vue'
-import FileCard from '@/components/FileCard.vue'
+import { ref, computed, onMounted, inject } from 'vue'
+import { fetchConfig, fetchReport, downloadExcel, openLocalExcel } from '@/api'
+import Icon from '@/components/Icon.vue'
+import FilterPanel from '@/components/FilterPanel.vue'
+import CategoryPills from '@/components/CategoryPills.vue'
 
-const toast = inject('toast')
-const tree = ref([])
-const workspaceRoot = ref('')
+/**
+ * 数据报表 / 知识图谱仪表板
+ * 数据策略：优先读后端真实分类，接口为空或失败时回落到内置 mock（保证页面可直接演示）。
+ * 筛选语义：同组多选取并集(OR)，不同组之间取交集(AND)；胶囊与层图例再叠加过滤。
+ */
+const toast = inject('toast', () => {})
 const loading = ref(true)
-// 下钻栈：每项 { node, segments }，segments 是从根到该节点的名字
-const trail = ref([])
+const workspaceRoot = ref('')
+const cards = ref([])
+const selected = ref(new Set())
+const activePill = ref('all')
+const activeLegend = ref('')
 
-const current = computed(() => trail.value.length
-  ? trail.value[trail.value.length - 1].node
-  : null)
-const currentSegments = computed(() => trail.value.length
-  ? trail.value[trail.value.length - 1].segments
-  : [])
-const children = computed(() => current.value ? (current.value.children || []) : (tree.value || []))
-const files = computed(() => current.value?.files || [])
+const dot = (n) => `var(--dot-${n})`
 
-onMounted(() => {
-  Promise.all([fetchReport(), fetchConfig()]).then(([d, config]) => {
-    tree.value = d || []
-    workspaceRoot.value = config?.workspaceRoot || ''
-    loading.value = false
-  }).catch((e) => {
-    loading.value = false
-    toast('读取报表失败：' + e.message)
-  })
-})
+/* ---------- 筛选维度（4 组，计数从当前卡片实时统计） ---------- */
+const filterDefs = [
+  {
+    title: '数据类型',
+    options: [
+      { id: 'eval', label: '评测数据', dot: dot(1) },
+      { id: 'biz', label: '业务明细', dot: dot(2) },
+      { id: 'dim', label: '维度字典', dot: dot(3) },
+      { id: 'log', label: '运行日志', dot: dot(4) }
+    ]
+  },
+  {
+    title: '数据来源',
+    options: [
+      { id: 'upload', label: '本地上传', dot: dot(5) },
+      { id: 'db', label: '数据库连接', dot: dot(6) },
+      { id: 'mcp', label: 'MCP 联网', dot: dot(7) }
+    ]
+  },
+  {
+    title: '状态',
+    options: [
+      { id: 'ready', label: '已归类', dot: dot(4) },
+      { id: 'check', label: '待校验', dot: dot(2) },
+      { id: 'archive', label: '已归档', dot: dot(7) }
+    ]
+  },
+  {
+    title: '时间范围',
+    options: [
+      { id: '7d', label: '近 7 天', dot: dot(1) },
+      { id: '30d', label: '近 30 天', dot: dot(3) },
+      { id: '90d', label: '近 90 天', dot: dot(5) },
+      { id: 'old', label: '更早', dot: dot(6) }
+    ]
+  }
+]
+const groups = computed(() => filterDefs.map((g) => ({
+  title: g.title,
+  options: g.options.map((o) => ({ ...o, count: cards.value.filter((c) => c.facets.includes(o.id)).length }))
+})))
 
-function drill(node) {
-  const segments = [...currentSegments.value, node.name]
-  trail.value.push({ node, segments })
+/* ---------- 分类胶囊 / 层图例 ---------- */
+const pillDefs = [
+  { id: 'all', label: '全部数据', dot: dot(1) },
+  { id: 'eval', label: '评测数据', dot: dot(2) },
+  { id: 'biz', label: '电商运营', dot: dot(4) },
+  { id: 'order', label: '历史订单', dot: dot(5) },
+  { id: 'refund', label: '退款分析', dot: dot(6) },
+  { id: 'dim', label: '维度字典', dot: dot(3) }
+]
+const pills = computed(() => pillDefs.map((p) => ({
+  ...p,
+  disabled: p.id !== 'all' && !cards.value.some((c) => c.categoryId === p.id)
+})))
+const legendDefs = [
+  { id: 'data', label: '数据层', dot: dot(1) },
+  { id: 'biz', label: '业务层', dot: dot(4) },
+  { id: 'time', label: '时间层', dot: dot(5) },
+  { id: 'state', label: '状态层', dot: dot(6) }
+]
+const legend = computed(() => legendDefs.map((l) => ({
+  ...l, count: cards.value.filter((c) => c.layerId === l.id).length
+})))
+
+/* ---------- 内置 mock（1~3 张文件卡） ---------- */
+const mockCards = [
+  {
+    id: 'm1', title: '评测基准集 · 电商问数',
+    tags: ['评测数据', '本地上传', '已归类'], tableCount: 3,
+    facets: ['eval', 'upload', 'ready', '7d'], categoryId: 'eval', layerId: 'data',
+    time: '16:32', createdAt: '2026-11-24 16:32', real: null, segments: []
+  },
+  {
+    id: 'm2', title: '订单明细 · 近 90 天快照',
+    tags: ['业务明细', '数据库连接', '待校验'], tableCount: 2,
+    facets: ['biz', 'db', 'check', '90d'], categoryId: 'order', layerId: 'biz',
+    time: '09:18', createdAt: '2026-11-21 09:18', real: null, segments: []
+  },
+  {
+    id: 'm3', title: '品类口径词典 v0.3',
+    tags: ['维度字典', '本地上传', '已归档'], tableCount: 1,
+    facets: ['dim', 'upload', 'archive', '30d'], categoryId: 'dim', layerId: 'time',
+    time: '14:05', createdAt: '2026-11-18 14:05', real: null, segments: []
+  }
+]
+
+/* ---------- 真实数据 → 卡片 ---------- */
+function fmtTime(t) { return t ? String(t).replace('T', ' ').slice(11, 16) : '' }
+function timeBucket(t) {
+  if (!t) return 'old'
+  const days = (Date.now() - new Date(String(t).replace(' ', 'T')).getTime()) / 86400000
+  if (days <= 7) return '7d'
+  if (days <= 30) return '30d'
+  if (days <= 90) return '90d'
+  return 'old'
+}
+function matchPill(text) {
+  if (/评测/.test(text)) return 'eval'
+  if (/退款/.test(text)) return 'refund'
+  if (/维度|字典|口径/.test(text)) return 'dim'
+  if (/订单|历史/.test(text)) return 'order'
+  if (/电商|运营/.test(text)) return 'biz'
+  return 'biz'
+}
+function flatten(nodes, path = []) {
+  const out = []
+  for (const n of nodes || []) {
+    const seg = [...path, n.name]
+    for (const f of n.files || []) out.push({ file: f, segments: seg })
+    out.push(...flatten(n.children || [], seg))
+  }
+  return out
+}
+function toCard(entry, i) {
+  const text = [...entry.segments, entry.file.origName || ''].join('/')
+  const type = /评测/.test(text) ? 'eval' : (/维度|字典|口径/.test(text) ? 'dim' : 'biz')
+  const typeLabel = { eval: '评测数据', dim: '维度字典', biz: '业务明细' }[type]
+  const bucket = timeBucket(entry.file.createdAt)
+  const bucketLabel = { '7d': '近 7 天', '30d': '近 30 天', '90d': '近 90 天', old: '更早' }[bucket]
+  return {
+    id: entry.file.uploadId || `r${i}`,
+    title: entry.file.origName || '未命名文件',
+    tags: [typeLabel, '本地上传', '已归类', bucketLabel].slice(0, 3),
+    tableCount: (entry.file.sheets || []).length,
+    facets: [type, 'upload', 'ready', bucket],
+    categoryId: matchPill(text),
+    layerId: type === 'eval' ? 'data' : (type === 'dim' ? 'time' : 'biz'),
+    time: fmtTime(entry.file.createdAt),
+    createdAt: entry.file.createdAt,
+    real: entry.file,
+    segments: entry.segments
+  }
 }
 
-function backTo(index) {
-  trail.value.splice(index)
+onMounted(() => {
+  Promise.all([fetchReport().catch(() => []), fetchConfig().catch(() => null)])
+    .then(([tree, config]) => {
+      workspaceRoot.value = config?.workspaceRoot || ''
+      const real = flatten(tree).map(toCard)
+      cards.value = real.length ? real : mockCards
+      loading.value = false
+    })
+    .catch(() => { cards.value = mockCards; loading.value = false })
+})
+
+/* ---------- 过滤：组内 OR，组间 AND ---------- */
+const visibleCards = computed(() => cards.value.filter((c) => {
+  if (activePill.value !== 'all' && c.categoryId !== activePill.value) return false
+  if (activeLegend.value && c.layerId !== activeLegend.value) return false
+  for (const g of filterDefs) {
+    const picked = g.options.filter((o) => selected.value.has(o.id)).map((o) => o.id)
+    if (picked.length && !picked.some((id) => c.facets.includes(id))) return false
+  }
+  return true
+}))
+const categoryCount = computed(() => new Set(visibleCards.value.map((c) => c.categoryId)).size)
+const currentPill = computed(() => pillDefs.find((p) => p.id === activePill.value) || pillDefs[0])
+function resetFilters() { selected.value = new Set(); activePill.value = 'all'; activeLegend.value = '' }
+
+/* ---------- 打开文件 ---------- */
+async function openFile(card) {
+  if (!card.real) { toast('这是演示数据，没有对应的 Excel 文件'); return }
+  const relative = card.real.filePath || [...card.segments, card.real.origName].join('/')
+  const root = (workspaceRoot.value || '').replace(/\/+$/, '')
+  const absPath = [root, String(relative).replace(/^\/+/, '')].filter(Boolean).join('/')
+  const result = openLocalExcel(absPath)
+  if (result === null) {
+    try { await downloadExcel(card.real.uploadId, card.real.origName) }
+    catch (e) { toast('打开失败：' + e.message) }
+    return
+  }
+  try { const err = await result; if (err) toast('打开失败：' + err) }
+  catch (e) { toast('打开失败：' + e.message) }
 }
 </script>
 
 <template>
-  <div class="wrap">
-    <div class="page-head">
-      <div class="kicker">Reports</div>
-      <h1>数据报表</h1>
-      <p>点开分类逐层深入，查看子分类与文件。点击文件在桌面端用 Excel 打开，浏览器里则直接下载。</p>
-    </div>
-
-    <div class="card">
-      <div v-if="loading" class="empty">正在读取分类…</div>
-      <div v-else-if="!tree.length" class="empty">
-        <div class="big">▦</div>
-        <div>还没有登记任何数据</div>
-        <div class="small" style="margin-top:8px">先到「上传文件」放一份 Excel。</div>
-      </div>
-      <template v-else>
-        <nav class="crumb-bar">
-          <button type="button" class="crumb" :class="{ here: !trail.length }" @click="backTo(0)">全部数据</button>
-          <template v-for="(step, i) in trail" :key="i">
-            <span class="crumb-sep">/</span>
-            <button type="button" class="crumb" :class="{ here: i === trail.length - 1 }" @click="backTo(i + 1)">
-              {{ step.node.name }}
-            </button>
-          </template>
-          <span class="crumb-count">{{ children.length }} 个分类 · {{ files.length }} 个文件</span>
-        </nav>
-
-        <div v-if="!children.length && !files.length" class="empty">
-          <div class="big">∅</div>
-          <div>这一层是空的</div>
+  <div class="kb-scope kb-page">
+    <div class="kb-view">
+      <div class="kb-container">
+        <!-- 标题区 -->
+        <div class="kb-head">
+          <div class="kb-eyebrow">Reports</div>
+          <h1>数据报表</h1>
+          <p>悬浮筛选、分类胶囊与文件卡片，聚焦你关心的数据资产。</p>
         </div>
-        <template v-else>
-          <div v-if="children.length" class="card-grid">
-            <CategoryCard v-for="n in children" :key="n.id ?? n.name" :node="n" @drill="drill" />
+
+        <div class="kb-card">
+          <!-- 卡片顶行：面包屑 + 筛选 + 计数 -->
+          <div class="kb-card-top">
+            <nav class="kb-crumb" aria-label="面包屑">
+              <button type="button" class="kb-crumb-item"
+                      :class="{ here: activePill === 'all' }" @click="activePill = 'all'">全部数据</button>
+              <template v-if="activePill !== 'all'">
+                <span class="kb-crumb-sep">/</span>
+                <button type="button" class="kb-crumb-item here">{{ currentPill.label }}</button>
+              </template>
+            </nav>
+
+            <FilterPanel v-model="selected" :groups="groups" />
+
+            <span class="kb-count">{{ categoryCount }} 个分类 · {{ visibleCards.length }} 个文件</span>
           </div>
-          <div v-if="files.length" class="card-grid">
-            <FileCard v-for="f in files" :key="f.uploadId || f.origName" :file="f"
-                      :workspace-root="workspaceRoot" :path-segments="currentSegments" />
+
+          <!-- 组件B：分类胶囊条 + 层图例 -->
+          <CategoryPills
+            :pills="pills" :active-id="activePill"
+            :legend="legend" :active-legend="activeLegend"
+            @select="activePill = $event"
+            @select-legend="activeLegend = activeLegend === $event ? '' : $event"
+          />
+
+          <!-- 文件卡片 -->
+          <div v-if="loading" class="kb-empty">正在读取数据…</div>
+          <div v-else-if="!visibleCards.length" class="kb-empty">
+            <div class="big">∅</div>
+            <div>当前筛选条件下没有数据</div>
+            <div class="small"><button type="button" class="kb-card-open" @click="resetFilters">清除筛选</button></div>
           </div>
-        </template>
-      </template>
+          <div v-else class="kb-grid">
+            <article v-for="c in visibleCards" :key="c.id" class="kb-fcard">
+              <div class="kb-fcard-top">
+                <span class="kb-fcard-ico"><Icon name="file" :size="16" /></span>
+                <span class="kb-fcard-kind">Excel</span>
+                <span class="kb-fcard-time">{{ c.time }}</span>
+              </div>
+              <h3 class="kb-fcard-title">{{ c.title }}</h3>
+              <div class="kb-tags">
+                <span v-for="tag in c.tags" :key="tag" class="kb-tag">{{ tag }}</span>
+              </div>
+              <div class="kb-fcard-foot">
+                <span>{{ c.tableCount }} 张表</span>
+                <button type="button" class="kb-card-open" @click="openFile(c)">
+                  打开 <Icon name="external" :size="14" />
+                </button>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
