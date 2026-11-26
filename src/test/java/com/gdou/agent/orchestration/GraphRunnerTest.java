@@ -3,7 +3,6 @@ package com.gdou.agent.orchestration;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import com.gdou.agent.api.service.MessageService;
 import com.gdou.agent.infra.TraceRecorder;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.orchestration.node.Node;
@@ -53,7 +52,7 @@ class GraphRunnerTest {
         return new RunContext("unit-test", sink);
     }
 
-    /** GraphRunner 的 node / messageService 都是 @Autowired 字段；纯单测没有容器，手动塞入假节点与 mock */
+    /** GraphRunner 的 node / traceRecorder 都是 @Autowired 字段；纯单测没有容器，手动塞入假节点与 mock */
     private static GraphRunner newRunner(Map<String, Node> nodes) {
         return newRunner(nodes, mock(TraceRecorder.class));
     }
@@ -62,7 +61,6 @@ class GraphRunnerTest {
     private static GraphRunner newRunner(Map<String, Node> nodes, TraceRecorder recorder) {
         GraphRunner runner = new GraphRunner();
         ReflectionTestUtils.setField(runner, "node", nodes);
-        ReflectionTestUtils.setField(runner, "messageService", mock(MessageService.class));
         ReflectionTestUtils.setField(runner, "traceRecorder", recorder);
         return runner;
     }

@@ -8,6 +8,7 @@ import com.gdou.agent.api.constant.MsgConstant;
 import com.gdou.agent.api.holder.SessionHolder;
 import com.gdou.agent.api.service.CategoryReportService;
 import com.gdou.agent.api.service.FileDownloadService;
+import com.gdou.agent.api.service.MessageService;
 import com.gdou.agent.api.service.SessionService;
 import com.gdou.agent.api.service.UploadService;
 import com.gdou.agent.infra.stream.SseStreamSink;
@@ -56,6 +57,9 @@ public class PersonalController {
     private SessionService sessionService;
 
     @Autowired
+    private MessageService messageService;
+
+    @Autowired
     private UploadService uploadService;
 
     @Autowired
@@ -87,7 +91,7 @@ public class PersonalController {
             return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS, session.getId());
         }else{
             log.error("用户新建会话窗口失败，请检查原因");
-            return Result.success(CodeConstant.CALL_ERROR, MsgConstant.CALL_ERROR, null);
+            return Result.error(CodeConstant.CALL_ERROR, MsgConstant.CALL_ERROR, null);
         }
     }
 
@@ -221,6 +225,8 @@ public class PersonalController {
                 try {
                     SessionHolder.set(session.getId());
                     SessionHolder.setCategory(session.getCategoryId());
+                    // 用户原话在入口线程池落库：与是否触发 query 工具无关，纯闲聊也记一条
+                    saveUserMessage(session.getId(), userMsg);
                     RunContext ctx = new RunContext(traceId, sink);
                     StringBuilder answer = new StringBuilder();
                     reactAgentRunner.run(userMsg, ctx)
@@ -254,6 +260,24 @@ public class PersonalController {
             log.error("[chat/stream] 提交异步任务失败 traceId={}, userMsg={}, type={}",
                     traceId, userMsg, e.getClass().getSimpleName());
             throw e;
+        }
+    }
+
+    /**
+     * 把用户原话落到 message 表。当前只记 user 一条：
+     * 工具调用过程与 assistant 回答暂不落库，避免把内部推理原文写进对话历史。
+     * content 是 NOT NULL，空白问题直接跳过。
+     */
+    private void saveUserMessage(Integer sessionId, String userMsg) {
+        if (userMsg == null || userMsg.isBlank()) return;
+        com.gdou.agent.meta.entity.Message row = com.gdou.agent.meta.entity.Message.builder()
+                .sessionId(sessionId)
+                .content(userMsg)
+                .role("user")
+                .createdAt(LocalDateTime.now())
+                .build();
+        if (!messageService.save(row)) {
+            log.error("[chat/stream] 用户消息落库失败 sessionId={}", sessionId);
         }
     }
 

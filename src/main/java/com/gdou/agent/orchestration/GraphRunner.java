@@ -1,9 +1,7 @@
 package com.gdou.agent.orchestration;
 
 import com.gdou.agent.api.holder.SessionHolder;
-import com.gdou.agent.api.service.MessageService;
 import com.gdou.agent.infra.TraceRecorder;
-import com.gdou.agent.meta.entity.Message;
 import com.gdou.agent.orchestration.node.Node;
 import com.gdou.agent.orchestration.node.NodeName;
 import lombok.extern.slf4j.Slf4j;
@@ -42,9 +40,6 @@ public class GraphRunner {
 
     @Autowired
     private  Map<String, Node> node;
-
-    @Autowired
-    private MessageService messageService;
 
     @Autowired
     private TraceRecorder traceRecorder;
@@ -199,9 +194,6 @@ public class GraphRunner {
         String next = Boolean.TRUE.equals(state.getNeedClarify())
                 ? NodeName.DONE : NodeName.SCHEMA_RETRIEVE;
         log.info("[graph] clarify 路由 from={} → {}, needClarify={}", current, next, state.getNeedClarify());
-        // clarify 阶段 answer 尚未生成，user 消息记原始问题；content 是 NOT NULL，不能传 null
-        buildMessage(state.getQuestion(), "user");
-        if (state.getNeedClarify()) buildMessage(state.getQuestionToUser(), "assistant");
         return next;
     }
 
@@ -250,20 +242,4 @@ public class GraphRunner {
         return NodeName.DONE;
     }
 
-    public void buildMessage(String msg,String role){
-        if (msg == null || msg.isBlank()) return;  // message.content 是 NOT NULL
-        Integer id = SessionHolder.get();
-        Message message = Message.builder()
-                .sessionId(id)
-                .content(msg)
-                .role(role)
-                .createdAt(LocalDateTime.now())
-                .build();
-        boolean save = messageService.save(message);
-        if (save) {
-            log.info("窗口{}对话信息落库成功,信息落库所得id:{}",id, message.getId());
-        }else{
-            log.error("窗口{}对话信息添加失败,请检查原因",id);
-        }
-    }
 }
