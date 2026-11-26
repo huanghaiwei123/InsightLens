@@ -94,7 +94,7 @@ public class UploadServiceImpl implements UploadService {
                 try {
                     String fileName = "%s_%s.xlsx".formatted(Objects.requireNonNull(s.getOriginalFilename(),"不知名文件.xlsx").substring(0, s.getOriginalFilename().lastIndexOf(".")), UUID.randomUUID().toString().substring(0, 8));
                     s.transferTo(temp.resolve(fileName).toFile());
-                    paths.add(temp.resolve(fileName).toFile().getAbsolutePath());
+                    paths.add(temp.resolve(fileName).toFile().getAbsolutePath().replace("\\","/"));
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
@@ -181,7 +181,7 @@ public class UploadServiceImpl implements UploadService {
         Map<String,Object> allFile = new LinkedHashMap<>();
         for (String path : paths) {
             String uuid = path.substring(path.lastIndexOf("_") + 1, path.lastIndexOf("."));
-            String fileName = path.substring(path.lastIndexOf(File.separator));
+            String fileName = path.substring(path.lastIndexOf("/"));
             ExcelDataListener listener = new ExcelDataListener(fileViewService,uuid);
             try(ExcelReader reader = FesodSheet.read(path).registerReadListener(listener).build()){
                 List<ReadSheet> sheets = reader.excelExecutor().sheetList();
