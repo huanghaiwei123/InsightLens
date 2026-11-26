@@ -28,6 +28,8 @@ public class ExcelDataListener extends AnalysisEventListener<Map<Integer,String>
 
     private final String uuid;
 
+    private Long row = 0L;
+
     public ExcelDataListener(FileViewService fileViewService, String uuid) {
         this.fileViewService = fileViewService;
         this.uuid = uuid;
@@ -40,6 +42,7 @@ public class ExcelDataListener extends AnalysisEventListener<Map<Integer,String>
 
     @Override
     public void invoke(Map<Integer, String> integerStringMap, AnalysisContext ctx) {
+        row++;
         String sheetName = ctx.readSheetHolder().getReadSheet().getSheetName();
         LinkedHashMap<String, String> map = new LinkedHashMap<>();
         integerStringMap.forEach(
@@ -57,11 +60,12 @@ public class ExcelDataListener extends AnalysisEventListener<Map<Integer,String>
         String filePath = ctx.readWorkbookHolder().getFile().getPath();
         String sheetName = ctx.readSheetHolder().getReadSheet().getSheetName();
         FileView view = FileView.builder()
+                .categoryId(FileView.PENDING_CATEGORY_ID)
                 .uploadId(uuid)
                 .origName(fileName)
                 .sheetName(sheetName)
                 .filePath(filePath)
-                .rowCount((long) data.size())
+                .rowCount(row)
                 .sampleData(data.toString())
                 .status("success")
                 .createdAt(LocalDateTime.now())

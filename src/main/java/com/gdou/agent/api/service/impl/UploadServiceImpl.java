@@ -71,10 +71,13 @@ public class UploadServiceImpl implements UploadService {
 
     @PostConstruct
     private void init() {
-        root = Path.of(workSpace);
+        // 必须转绝对路径：MultipartFile.transferTo(File) 收到相对路径时由 Tomcat
+        // 按它自己的工作目录（.../work/Tomcat/localhost/ROOT）解析，而不是 JVM 的
+        // user.dir。开发模式 agent.workspace=./data/excel 时会写到不存在的目录里。
+        root = Path.of(workSpace).toAbsolutePath().normalize();
         try {
             Files.createDirectories(root);
-            temp = Files.createTempDirectory(root,"temp");
+            temp = Files.createTempDirectory(root, "temp");
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -104,7 +107,7 @@ public class UploadServiceImpl implements UploadService {
                     new SystemMessage(prompt("message/UploadMessage.txt")),
                     new UserMessage(
                             "用户上传的文件的信息是" + allFile
-                                    + "|" + "临时目录相对于工作目录的地址是" + Path.of(workSpace).relativize(temp)
+                                    + "|" + "临时目录相对于工作目录的地址是" + root.relativize(temp)
                                     + "|"
                                     + folderTool.listFolder()
                                     + "|"
@@ -128,7 +131,7 @@ public class UploadServiceImpl implements UploadService {
      * 剔除本批刚落 temp、尚未归档的新文件，避免模型把它们当作"已有文件"重复移动。
      */
     private String existingFilesSegment() {
-        Path workspace = Path.of(workSpace).normalize();
+        Path workspace = root;
         String tempRelative = workspace.relativize(temp).toString().replace('\\', '/');
         List<FileView> views = fileViewService.list();
         // 分类路径 -> 文件名 -> 首行样本字符串；同一文件多 sheet 共享 origName，putIfAbsent 去重保序
@@ -138,6 +141,10 @@ public class UploadServiceImpl implements UploadService {
                 String fileName = view.getOrigName();
                 String storedPath = view.getFilePath();
                 if (fileName == null || fileName.isBlank() || storedPath == null || storedPath.isBlank()) {
+                    continue;
+                }
+                if (FileView.PENDING_CATEGORY_ID.equals(view.getCategoryId())) {
+                    // -1 = 待归类，不属于任何已有分类，不给模型当参考
                     continue;
                 }
                 if (storedPath.matches("^[A-Za-z][A-Za-z0-9+.-]*://.*")) {

@@ -9,6 +9,15 @@ spring:
   config:
     import: file:${insightlens.home:.}/application-local.yaml
 
+  # 首次启动（尤其 Electron 全新 userData）自动建表：InsightLens.sql 全部是
+  # CREATE ... IF NOT EXISTS / ADD COLUMN IF NOT EXISTS，重复执行幂等。
+  # 不配这项时空白库没有任何业务表，报表接口直接 500。
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:InsightLens.sql
+      continue-on-error: false
+
   datasource:
     # 文件模式(持久化,重启数据保留)
     # 打包后数据库必须放用户数据目录，否则写不进 Program Files

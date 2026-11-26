@@ -21,8 +21,10 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -74,6 +76,26 @@ class UploadServiceImplTest {
         ReflectionTestUtils.invokeMethod(service, "afterLLmCall", answer);
     }
 
+    @Test
+    @DisplayName("相对 agent.workspace 必须转成绝对路径，否则 transferTo 会写进 Tomcat 工作目录")
+    void initResolvesWorkspaceToAbsolutePath() {
+        UploadServiceImpl service = serviceWith(mock(FolderTool.class), mock(FileTool.class),
+                mock(CategoryService.class), mock(FileViewService.class));
+        Path relative = Path.of("target", "upload-init-" + UUID.randomUUID());
+        ReflectionTestUtils.setField(service, "workSpace", relative.toString());
+
+        ReflectionTestUtils.invokeMethod(service, "init");
+
+        Path root = (Path) ReflectionTestUtils.getField(service, "root");
+        Path temp = (Path) ReflectionTestUtils.getField(service, "temp");
+        assertThat(root).isNotNull();
+        assertThat(root.isAbsolute()).isTrue();
+        assertThat(temp).isNotNull();
+        assertThat(temp.isAbsolute()).isTrue();
+        assertThat(temp.getParent()).isEqualTo(root);
+        assertThat(Files.isDirectory(temp)).isTrue();
+    }
+
     /** 造一份 {sheet名={列名=值}} 样本字符串，与监听器存进 sample_data 的格式一致 */
     private static String sample(String sheet, String... kv) {
         StringBuilder sb = new StringBuilder("{" + sheet + "={");
@@ -95,6 +117,7 @@ class UploadServiceImplTest {
         Path workspace = Path.of("").toAbsolutePath().resolve("workspace");
         Path temp = workspace.resolve("temp123");
         ReflectionTestUtils.setField(service, "workSpace", workspace.toString());
+        ReflectionTestUtils.setField(service, "root", workspace);
         ReflectionTestUtils.setField(service, "temp", temp);
 
         String orderSample = sample("订单明细", "order_id", "1001", "amount", "299.00");
@@ -142,6 +165,7 @@ class UploadServiceImplTest {
         Path workspace = Path.of("").toAbsolutePath().resolve("workspace");
         Path temp = workspace.resolve("temp456");
         ReflectionTestUtils.setField(service, "workSpace", workspace.toString());
+        ReflectionTestUtils.setField(service, "root", workspace);
         ReflectionTestUtils.setField(service, "temp", temp);
 
         when(folderTool.listFolder()).thenReturn("用户当前环境的各级文件分类如下：{1=[电商运营], 2=[]}");

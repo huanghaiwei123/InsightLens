@@ -19,6 +19,12 @@ import java.time.LocalDateTime;
 public class FileView {
 
     /**
+     * 待归类哨兵值：Excel 解析落库时还没有调模型分类，category_id 一律写 -1；
+     * 模型归类后由 afterLLmCall 回填真实 category.id。列保持 NOT NULL，不用改库约束。
+     */
+    public static final Integer PENDING_CATEGORY_ID = -1;
+
+    /**
      * 主键id（自增，取值来自 seq_file_view_id）
      */
     @TableId(value = "id", type = IdType.AUTO)

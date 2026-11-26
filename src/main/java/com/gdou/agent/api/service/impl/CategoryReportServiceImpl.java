@@ -18,9 +18,11 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 分类报表聚合：大分类(category 表) → 小分类(file_path 里的目录层级) → 文件 → sheet。
@@ -28,7 +30,7 @@ import java.util.Map;
  *
  * 小分类不从 category 表取——那张表只有大分类；上传时已把真实相对路径
  * （如 销售数据/2026/华东/订单.xlsx）写回 file_view.file_path，这里按它拆目录层级。
- * 历史数据里的 eval:// 等无效路径无法解析，文件直接挂在大分类根节点下。
+ * 评测造数用的 eval:// 伪路径没有真实 Excel，不进报表；只含这类文件的分类整类隐藏。
  */
 @Service
 public class CategoryReportServiceImpl implements CategoryReportService {
@@ -53,8 +55,15 @@ public class CategoryReportServiceImpl implements CategoryReportService {
         List<FileView> views = fileViewService.list(
                 new LambdaQueryWrapper<FileView>().orderByAsc(FileView::getCreatedAt));
 
+        // 评测造数用 eval:// 这类伪路径登记，没有真实 Excel 可打开，也不该出现在分类界面。
+        // 统计出「只有伪路径文件」的分类，整类从报表里剔除；真实空分类仍保留供展示。
+        Set<Integer> pseudoOnlyCategories = pseudoOnlyCategories(views);
+
         Map<Integer, CategoryReportVO> byCategory = new LinkedHashMap<>();
         for (Category category : categories) {
+            if (pseudoOnlyCategories.contains(category.getId())) {
+                continue;
+            }
             byCategory.put(category.getId(),
                     newCategory(category.getId(), category.getName(), category.getCreatedAt()));
         }
@@ -64,6 +73,10 @@ public class CategoryReportServiceImpl implements CategoryReportService {
         Map<String, FileReportVO> files = new HashMap<>();
 
         for (FileView view : views) {
+            // 伪路径文件（评测造数）没有真实文件，不进任何分类树
+            if (isPseudoPath(view.getFilePath())) {
+                continue;
+            }
             CategoryReportVO root = byCategory.get(view.getCategoryId());
             if (root == null) {
                 if (orphan == null) {
@@ -106,6 +119,30 @@ public class CategoryReportServiceImpl implements CategoryReportService {
         // 每一级节点都要汇总自己 + 所有子孙的统计，前端展开任意层级都能拿到总数
         result.forEach(this::computeStats);
         return result;
+    }
+
+    /**
+     * 找出「只有评测伪路径文件」的分类：出现过伪路径文件、且没有任何真实文件的分类。
+     * 这些分类在界面上只会显示一个点不开的假文件，整类隐藏更干净；评测脚本仍按原样读取数据库。
+     */
+    private Set<Integer> pseudoOnlyCategories(List<FileView> views) {
+        Set<Integer> hasPseudo = new HashSet<>();
+        Set<Integer> hasReal = new HashSet<>();
+        for (FileView view : views) {
+            Integer categoryId = view.getCategoryId();
+            // -1 是解析后待归类的哨兵值；null 兼容更早的历史数据，都不属于任何真实分类
+            if (categoryId == null || FileView.PENDING_CATEGORY_ID.equals(categoryId)) {
+                continue;
+            }
+            (isPseudoPath(view.getFilePath()) ? hasPseudo : hasReal).add(categoryId);
+        }
+        hasPseudo.removeAll(hasReal);
+        return hasPseudo;
+    }
+
+    /** eval://orders 这类伪协议路径不是系统里的真实文件，报表和上传提示词都要排除 */
+    private boolean isPseudoPath(String rawPath) {
+        return rawPath != null && rawPath.matches("^[A-Za-z][A-Za-z0-9+.-]*://.*");
     }
 
     /** 给 Electron 拼本地文件路径用；必须是绝对路径，且分隔符符合当前操作系统 */

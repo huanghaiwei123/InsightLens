@@ -20,14 +20,14 @@ import static org.mockito.Mockito.when;
 /**
  * 验证报表树能按 file_path 还原小分类目录层级。
  * category 表只有大分类，小分类必须来自上传后写回的相对路径；
- * 历史脏路径（eval://）要能兜底挂在大分类根节点下，不能丢文件。
+ * 评测造数的 eval:// 伪路径不进报表：有真实文件的分类只隐藏假文件，纯评测分类整类隐藏。
  */
 class CategoryReportServiceTest {
 
     private static final LocalDateTime T = LocalDateTime.of(2026, 11, 20, 10, 0);
 
     @Test
-    @DisplayName("file_path 拆出多层小分类，sheet 聚合到文件，脏路径挂根节点")
+    @DisplayName("file_path 拆出多层小分类，sheet 聚合到文件，评测伪路径不进报表")
     void buildTreeFromFilePath() {
         CategoryService categoryService = mock(CategoryService.class);
         FileViewService fileViewService = mock(FileViewService.class);
@@ -63,19 +63,76 @@ class CategoryReportServiceTest {
         assertThat(east.getFiles().get(0).getSheets()).hasSize(2);
         assertThat(east.getTotalRows()).isEqualTo(8000L);
 
-        assertThat(root.getFiles()).hasSize(1);
-        assertThat(root.getFiles().get(0).getOrigName()).isEqualTo("orders");
+        // eval://orders 是评测造数，不进报表，也不计入任何统计
+        assertThat(root.getFiles()).isEmpty();
 
-        assertThat(root.getFileCount()).isEqualTo(3);
-        assertThat(root.getSheetCount()).isEqualTo(4);
-        assertThat(root.getTotalRows()).isEqualTo(9200L);
+        assertThat(root.getFileCount()).isEqualTo(2);
+        assertThat(root.getSheetCount()).isEqualTo(3);
+        assertThat(root.getTotalRows()).isEqualTo(9000L);
+    }
+
+    @Test
+    @DisplayName("只有评测伪路径文件的分类整类隐藏，真实空分类仍保留")
+    void hidePseudoOnlyCategory() {
+        CategoryService categoryService = mock(CategoryService.class);
+        FileViewService fileViewService = mock(FileViewService.class);
+        when(categoryService.list(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                Category.builder().id(1).name("评测数据").createdAt(T).build(),
+                Category.builder().id(2).name("销售数据").createdAt(T).build(),
+                Category.builder().id(3).name("新建空分类").createdAt(T).build()
+        ));
+        when(fileViewService.list(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                view(201, "u-eval", "orders", "eval://orders", "orders", 200L),
+                viewOf(2, 202, "u-real", "订单.xlsx", "销售数据/订单.xlsx", "Sheet1", 500L)
+        ));
+
+        CategoryReportServiceImpl service = new CategoryReportServiceImpl();
+        ReflectionTestUtils.setField(service, "categoryService", categoryService);
+        ReflectionTestUtils.setField(service, "fileViewService", fileViewService);
+        ReflectionTestUtils.setField(service, "workSpace", "D:/tmp/workspace");
+
+        List<CategoryReportVO> report = service.buildReport();
+
+        assertThat(report).extracting(CategoryReportVO::getName)
+                .containsExactly("销售数据", "新建空分类");
+    }
+
+    @Test
+    @DisplayName("待归类文件的 category_id=-1 进「未分类」，不丢失也不混进真实分类")
+    void pendingFileGoesToOrphan() {
+        CategoryService categoryService = mock(CategoryService.class);
+        FileViewService fileViewService = mock(FileViewService.class);
+        when(categoryService.list(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                Category.builder().id(1).name("销售数据").createdAt(T).build()
+        ));
+        when(fileViewService.list(any(LambdaQueryWrapper.class))).thenReturn(List.of(
+                viewOf(FileView.PENDING_CATEGORY_ID, 301, "u-pending", "a.xlsx",
+                        "temp/a.xlsx", "Sheet1", 10L)
+        ));
+
+        CategoryReportServiceImpl service = new CategoryReportServiceImpl();
+        ReflectionTestUtils.setField(service, "categoryService", categoryService);
+        ReflectionTestUtils.setField(service, "fileViewService", fileViewService);
+        ReflectionTestUtils.setField(service, "workSpace", "D:/tmp/workspace");
+
+        List<CategoryReportVO> report = service.buildReport();
+
+        // 真实空分类仍保留；待归类文件落到末尾的「未分类」节点
+        assertThat(report).extracting(CategoryReportVO::getName)
+                .containsExactly("销售数据", "未分类");
+        assertThat(report.get(1).getFileCount()).isEqualTo(1);
     }
 
     private static FileView view(Integer id, String uploadId, String origName,
                                  String filePath, String sheetName, Long rowCount) {
+        return viewOf(1, id, uploadId, origName, filePath, sheetName, rowCount);
+    }
+
+    private static FileView viewOf(Integer categoryId, Integer id, String uploadId, String origName,
+                                   String filePath, String sheetName, Long rowCount) {
         return FileView.builder()
                 .id(id)
-                .categoryId(1)
+                .categoryId(categoryId)
                 .uploadId(uploadId)
                 .origName(origName)
                 .filePath(filePath)
