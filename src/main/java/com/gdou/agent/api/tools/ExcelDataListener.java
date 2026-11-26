@@ -62,6 +62,7 @@ public class ExcelDataListener extends AnalysisEventListener<Map<Integer,String>
                 .sheetName(sheetName)
                 .filePath(filePath)
                 .rowCount((long) data.size())
+                .sampleData(data.toString())
                 .status("success")
                 .createdAt(LocalDateTime.now())
                 .build();

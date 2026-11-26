@@ -52,18 +52,24 @@ CREATE TABLE IF NOT EXISTS file_view(
     file_path    VARCHAR NOT NULL,       -- 相对 agent.workspace 的路径，如 <uuid>/<name>.xlsx
     sheet_name   VARCHAR NOT NULL,       -- Excel 内的工作表名，可中文，仅展示与映射
     row_count    BIGINT,                 -- 本 sheet 行数，回答回显"基于 N 行"
+    sample_data  VARCHAR,                -- 首行样本 {sheet={列=值}}，供上传归类提示词按内容细分
     status       VARCHAR NOT NULL,       -- success / failed
     created_at   TIMESTAMP NOT NULL      -- 上传时间，前端报表的时间轴
     );
-COMMENT ON TABLE file_view IS '文件注册表：一行=一个sheet；文件是唯一数据源，数据行不入库';
+-- 老库升级：已建好的库不会因 CREATE TABLE IF NOT EXISTS 自动加列，需单独补这一句
+ALTER TABLE file_view ADD COLUMN IF NOT EXISTS sample_data VARCHAR;
+COMMENT ON TABLE file_view IS '文件注册表：一行=一个sheet；文件是唯一数据源，数据行不入库（仅存首行样本）';
 COMMENT ON COLUMN file_view.category_id  IS '所属大分类，逻辑关联 category.id；三节点按此过滤实现隔离';
 COMMENT ON COLUMN file_view.upload_id    IS '文件级UUID，删除与文件列表聚合按此定位；orig_name 仅展示不做删除条件';
 COMMENT ON COLUMN file_view.file_path    IS '相对 agent.workspace 的文件路径，直读 read_xlsx 用；模型SQL里的表名来源';
 COMMENT ON COLUMN file_view.sheet_name   IS 'Excel原sheet名；用户口语里说"订单明细"时靠它定位到本行';
+COMMENT ON COLUMN file_view.sample_data  IS '首行样本 Map 的 toString，形如 {订单明细={order_id=1001,amount=299}}，供上传提示词第4段使用';
 COMMENT ON COLUMN file_view.status       IS 'success / failed；单个sheet解析失败不影响同文件其他sheet';
 
 CREATE INDEX IF NOT EXISTS idx_file_view_category ON file_view (category_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_file_view_upload   ON file_view (upload_id);
+
+
 
 
 CREATE SEQUENCE IF NOT EXISTS seq_session_id START 1;

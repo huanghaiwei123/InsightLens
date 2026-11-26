@@ -9,14 +9,20 @@ import com.gdou.agent.api.service.CategoryService;
 import com.gdou.agent.api.service.FileViewService;
 import com.gdou.agent.api.tools.FileTool;
 import com.gdou.agent.api.tools.FolderTool;
+import com.gdou.agent.infra.LlmClient;
 import com.gdou.agent.meta.entity.Category;
 import com.gdou.agent.meta.entity.FileView;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
+
+import java.nio.file.Path;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -66,6 +72,101 @@ class UploadServiceImplTest {
 
     private static void call(UploadServiceImpl service, String answer) {
         ReflectionTestUtils.invokeMethod(service, "afterLLmCall", answer);
+    }
+
+    /** 造一份 {sheet名={列名=值}} 样本字符串，与监听器存进 sample_data 的格式一致 */
+    private static String sample(String sheet, String... kv) {
+        StringBuilder sb = new StringBuilder("{" + sheet + "={");
+        for (int i = 0; i < kv.length; i += 2) {
+            if (i > 0) {
+                sb.append(", ");
+            }
+            sb.append(kv[i]).append('=').append(kv[i + 1]);
+        }
+        return sb.append("}}").toString();
+    }
+
+    @Test
+    @DisplayName("提示词第 4 段：按分类分组列已有文件并附首行样本，去重、排除 temp 与伪路径")
+    void existingFilesSegment() {
+        FileViewService fileViewService = mock(FileViewService.class);
+        UploadServiceImpl service = serviceWith(mock(FolderTool.class), mock(FileTool.class),
+                mock(CategoryService.class), fileViewService);
+        Path workspace = Path.of("").toAbsolutePath().resolve("workspace");
+        Path temp = workspace.resolve("temp123");
+        ReflectionTestUtils.setField(service, "workSpace", workspace.toString());
+        ReflectionTestUtils.setField(service, "temp", temp);
+
+        String orderSample = sample("订单明细", "order_id", "1001", "amount", "299.00");
+        when(fileViewService.list()).thenReturn(List.of(
+                FileView.builder().origName("订单_a1b2c3d4.xlsx")
+                        .filePath(workspace.resolve("电商运营/订单_a1b2c3d4.xlsx").toString())
+                        .sampleData(orderSample).build(),
+                // 同一文件的多个 sheet 共享 origName/filePath，清单里应只出现一次
+                FileView.builder().origName("订单_a1b2c3d4.xlsx")
+                        .filePath(workspace.resolve("电商运营/订单_a1b2c3d4.xlsx").toString())
+                        .sampleData(orderSample).build(),
+                FileView.builder().origName("退款_9a4e2b11.xlsx")
+                        .filePath(workspace.resolve("电商运营/历史订单/退款_9a4e2b11.xlsx").toString())
+                        .sampleData(sample("退款明细", "order_id", "2002", "reason", "质量")).build(),
+                // 老数据没有样本字段，退化为 {} 而不是崩
+                FileView.builder().origName("无样本_5e6f7a8b.xlsx")
+                        .filePath(workspace.resolve("电商运营/无样本_5e6f7a8b.xlsx").toString()).build(),
+                // 本批刚落 temp、尚未归档的新文件：不算已有文件
+                FileView.builder().origName("本批_1a2b3c4d.xlsx")
+                        .filePath(temp.resolve("本批_1a2b3c4d.xlsx").toString())
+                        .sampleData(orderSample).build(),
+                // eval:// 伪路径不是真实文件
+                FileView.builder().origName("伪造.xlsx").filePath("eval://orders")
+                        .sampleData(orderSample).build()
+        ));
+
+        String segment = ReflectionTestUtils.invokeMethod(service, "existingFilesSegment");
+
+        assertThat(segment).isEqualTo("用户当前环境各分类下已有的文件如下：{"
+                + "电商运营={订单_a1b2c3d4.xlsx={订单明细={order_id=1001, amount=299.00}}, "
+                + "无样本_5e6f7a8b.xlsx={}}, "
+                + "电商运营/历史订单={退款_9a4e2b11.xlsx={退款明细={order_id=2002, reason=质量}}}}");
+    }
+
+    @Test
+    @DisplayName("upload 拼装 UserMessage 时带上第 4 段，且模型输出的已有文件 transfer 能落地")
+    void uploadIncludesExistingFilesSegment() {
+        FolderTool folderTool = mock(FolderTool.class);
+        FileTool fileTool = mock(FileTool.class);
+        CategoryService categoryService = mock(CategoryService.class);
+        FileViewService fileViewService = mock(FileViewService.class);
+        LlmClient llmClient = mock(LlmClient.class);
+        UploadServiceImpl service = serviceWith(folderTool, fileTool, categoryService, fileViewService);
+        ReflectionTestUtils.setField(service, "llmClient", llmClient);
+        Path workspace = Path.of("").toAbsolutePath().resolve("workspace");
+        Path temp = workspace.resolve("temp456");
+        ReflectionTestUtils.setField(service, "workSpace", workspace.toString());
+        ReflectionTestUtils.setField(service, "temp", temp);
+
+        when(folderTool.listFolder()).thenReturn("用户当前环境的各级文件分类如下：{1=[电商运营], 2=[]}");
+        when(fileViewService.list()).thenReturn(List.of(
+                FileView.builder().origName("订单_9a4e2b11.xlsx")
+                        .filePath(workspace.resolve("电商运营/订单_9a4e2b11.xlsx").toString())
+                        .sampleData(sample("订单明细", "order_id", "9001", "category", "数码")).build()
+        ));
+        when(llmClient.call(any())).thenReturn("""
+                {"transfers":[{"fileName":"订单_9a4e2b11.xlsx","from":"电商运营","to":"退款分析"}],"create":["退款分析"],"delete":null}
+                """);
+        when(categoryService.getOne(any(LambdaQueryWrapper.class))).thenReturn(null);
+
+        service.upload(List.of());
+
+        ArgumentCaptor<List<Message>> messages = ArgumentCaptor.forClass(List.class);
+        verify(llmClient).call(messages.capture());
+        assertThat(messages.getValue()).anySatisfy(m -> {
+            assertThat(m).isInstanceOf(UserMessage.class);
+            assertThat(((UserMessage) m).getText())
+                    .contains("用户当前环境各分类下已有的文件如下：{电商运营={订单_9a4e2b11.xlsx="
+                            + "{订单明细={order_id=9001, category=数码}}}}");
+        });
+        // 已有文件从"电商运营"搬到新建统计分类，filePath 同步回写
+        verify(fileTool).transfer("电商运营/订单_9a4e2b11.xlsx", "退款分析");
     }
 
     @Test
@@ -161,6 +262,40 @@ class UploadServiceImplTest {
 
         verify(folderTool).deleteFolder("临时测试");
         verify(folderTool, never()).createFolder(any());
+    }
+
+    @Test
+    @DisplayName("拆分重组：新文件与已有文件主题不同，去两个不同的新子分类，各自建目录")
+    void splitIntoDifferentSubCategories() {
+        FolderTool folderTool = mock(FolderTool.class);
+        FileTool fileTool = mock(FileTool.class);
+        CategoryService categoryService = mock(CategoryService.class);
+        FileViewService fileViewService = mock(FileViewService.class);
+        when(categoryService.getOne(any(LambdaQueryWrapper.class)))
+                .thenReturn(Category.builder().id(5).name("电商订单").build());
+
+        // 复刻示例7：新利润文件去 电商订单/利润，已有退款文件从 电商订单 搬到 电商订单/退款
+        String answer = """
+                {"transfers":[
+                  {"fileName":"利润表_b2c3d4e5.xlsx","from":"temp222","to":"电商订单/利润"},
+                  {"fileName":"退款明细_9a4e2b11.xlsx","from":"电商订单","to":"电商订单/退款"}
+                ],"create":["电商订单/利润","电商订单/退款"],"delete":null}
+                """;
+        call(serviceWith(folderTool, fileTool, categoryService, fileViewService), answer);
+
+        // 两条独立的移动：新文件从 temp、已有文件从原分类，去不同目标
+        verify(fileTool).transfer("temp222/利润表_b2c3d4e5.xlsx", "电商订单/利润");
+        verify(fileTool).transfer("电商订单/退款明细_9a4e2b11.xlsx", "电商订单/退款");
+        // 两个新子分类都建目录
+        verify(folderTool).createFolder("电商订单/利润");
+        verify(folderTool).createFolder("电商订单/退款");
+        // 两个文件都回写 filePath，且一级分类都取 电商订单
+        ArgumentCaptor<LambdaUpdateWrapper<FileView>> uw = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(fileViewService, org.mockito.Mockito.times(2)).update(uw.capture());
+        assertThat(uw.getAllValues()).extracting(w -> java.util.List.copyOf(w.getParamNameValuePairs().values()))
+                .containsExactlyInAnyOrder(
+                        java.util.List.of("电商订单/利润/利润表_b2c3d4e5.xlsx", 5),
+                        java.util.List.of("电商订单/退款/退款明细_9a4e2b11.xlsx", 5));
     }
 
     @Test

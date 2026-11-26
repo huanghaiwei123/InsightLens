@@ -55,6 +55,12 @@ public class FileView {
     private Long rowCount;
 
     /**
+     * 首行样本，Map 的 toString，形如 {订单明细={order_id=1001,amount=299}}；
+     * 上传归类时给模型看已有文件内容，用于按样本列细分
+     */
+    private String sampleData;
+
+    /**
      * 状态：success / failed；单个 sheet 解析失败不影响同文件其他 sheet
      */
     private String status;

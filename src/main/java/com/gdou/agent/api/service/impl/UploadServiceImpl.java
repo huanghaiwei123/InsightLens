@@ -35,6 +35,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -106,6 +107,8 @@ public class UploadServiceImpl implements UploadService {
                                     + "|" + "临时目录相对于工作目录的地址是" + Path.of(workSpace).relativize(temp)
                                     + "|"
                                     + folderTool.listFolder()
+                                    + "|"
+                                    + existingFilesSegment()
                     )
             );
             String answer = llmClient.call(messages);
@@ -116,6 +119,62 @@ public class UploadServiceImpl implements UploadService {
             throw new BusinessException(CodeConstant.CALL_ERROR, "文件上传失败，请稍后重试");
         }
         return "文件上传完毕，已为您解析好数据";
+    }
+
+    /**
+     * 拼出归类提示词的第 4 段：现有文件清单（按分类路径分组，每个文件附首行样本）。
+     * 数据取自 file_view 注册表：filePath 的父目录当分类，origName 当文件名，
+     * sampleData 是监听器写入时存的首行样本字符串（形如 {sheet={列=值}}），直接拼接即可。
+     * 剔除本批刚落 temp、尚未归档的新文件，避免模型把它们当作"已有文件"重复移动。
+     */
+    private String existingFilesSegment() {
+        Path workspace = Path.of(workSpace).normalize();
+        String tempRelative = workspace.relativize(temp).toString().replace('\\', '/');
+        List<FileView> views = fileViewService.list();
+        // 分类路径 -> 文件名 -> 首行样本字符串；同一文件多 sheet 共享 origName，putIfAbsent 去重保序
+        Map<String, Map<String, String>> byCategory = new TreeMap<>();
+        if (views != null) {
+            for (FileView view : views) {
+                String fileName = view.getOrigName();
+                String storedPath = view.getFilePath();
+                if (fileName == null || fileName.isBlank() || storedPath == null || storedPath.isBlank()) {
+                    continue;
+                }
+                if (storedPath.matches("^[A-Za-z][A-Za-z0-9+.-]*://.*")) {
+                    // eval:// 这类伪协议不是真实文件路径
+                    continue;
+                }
+                Path absolute;
+                try {
+                    absolute = Path.of(storedPath);
+                } catch (InvalidPathException e) {
+                    // eval:// 这类伪路径不是真实文件，跳过
+                    continue;
+                }
+                if (!absolute.isAbsolute()) {
+                    absolute = workspace.resolve(absolute);
+                }
+                absolute = absolute.normalize();
+                if (!absolute.startsWith(workspace)) {
+                    continue;
+                }
+                String relative = workspace.relativize(absolute).toString().replace('\\', '/');
+                if (relative.equals(tempRelative) || relative.startsWith(tempRelative + "/")) {
+                    // 本批新文件此刻还躺在 temp 里，不算"已有文件"
+                    continue;
+                }
+                int lastSlash = relative.lastIndexOf('/');
+                if (lastSlash <= 0) {
+                    continue;
+                }
+                String category = relative.substring(0, lastSlash);
+                // sampleData 已是 {sheet={列=值}} 字符串，老数据可能为 null，退化为 {}=无样本
+                String sample = view.getSampleData() == null ? "{}" : view.getSampleData();
+                byCategory.computeIfAbsent(category, key -> new LinkedHashMap<>())
+                        .putIfAbsent(fileName, sample);
+            }
+        }
+        return "用户当前环境各分类下已有的文件如下：" + byCategory;
     }
 
     private Map<String,Object> analysisExcels(List<String> paths) {
