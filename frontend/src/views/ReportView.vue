@@ -6,9 +6,10 @@ import FilterPanel from '@/components/FilterPanel.vue'
 import CategoryPills from '@/components/CategoryPills.vue'
 
 /**
- * 数据报表 / 知识图谱仪表板
- * 数据策略：优先读后端真实分类，接口为空或失败时回落到内置 mock（保证页面可直接演示）。
- * 筛选语义：同组多选取并集(OR)，不同组之间取交集(AND)；胶囊与层图例再叠加过滤。
+ * 数据报表 / 知识图谱仪表板（全屏悬浮画布）
+ * - 画布铺满视口，节点散布、轻微漂浮，节点间连线，无外层边框束缚
+ * - 配色沿用米白暖橙规范；筛选/胶囊/图例浮在画布上方
+ * - 数据策略：优先真实分类，接口为空或失败回落 mock
  */
 const toast = inject('toast', () => {})
 const loading = ref(true)
@@ -17,6 +18,7 @@ const cards = ref([])
 const selected = ref(new Set())
 const activePill = ref('all')
 const activeLegend = ref('')
+const zoom = ref(1)
 
 const dot = (n) => `var(--dot-${n})`
 
@@ -85,7 +87,7 @@ const legend = computed(() => legendDefs.map((l) => ({
   ...l, count: cards.value.filter((c) => c.layerId === l.id).length
 })))
 
-/* ---------- 内置 mock（1~3 张文件卡） ---------- */
+/* ---------- 内置 mock ---------- */
 const mockCards = [
   {
     id: 'm1', title: '评测基准集 · 电商问数',
@@ -160,7 +162,9 @@ onMounted(() => {
     .then(([tree, config]) => {
       workspaceRoot.value = config?.workspaceRoot || ''
       const real = flatten(tree).map(toCard)
-      cards.value = real.length ? real : mockCards
+      // 真实数据优先；并入 mock 演示节点铺满画布（按文件名去重），形成图谱视图
+      const seen = new Set(real.map((c) => c.title))
+      cards.value = [...real, ...mockCards.filter((c) => !seen.has(c.title))]
       loading.value = false
     })
     .catch(() => { cards.value = mockCards; loading.value = false })
@@ -180,7 +184,83 @@ const categoryCount = computed(() => new Set(visibleCards.value.map((c) => c.cat
 const currentPill = computed(() => pillDefs.find((p) => p.id === activePill.value) || pillDefs[0])
 function resetFilters() { selected.value = new Set(); activePill.value = 'all'; activeLegend.value = '' }
 
-/* ---------- 打开文件 ---------- */
+/* ---------- 画布节点：分类层节点 + 文件节点 ---------- */
+const VW = 1200
+const VH = 720
+const NODE_W = 240
+const LAYER_H = 118
+const FILE_H = 152
+
+const layerSlots = [
+  { x: 64, y: 268 }, { x: 470, y: 232 }, { x: 884, y: 270 }, { x: 300, y: 528 }
+]
+const fileSlots = [
+  { x: 70, y: 430 }, { x: 430, y: 470 }, { x: 820, y: 430 },
+  { x: 248, y: 566 }, { x: 610, y: 566 }, { x: 930, y: 566 }
+]
+const layerMeta = {
+  eval: { label: '评测基准', desc: '问数基准集与评分口径', dot: dot(1) },
+  biz: { label: '电商运营', desc: '运营明细与业务指标', dot: dot(4) },
+  order: { label: '历史订单', desc: '近 90 天订单快照', dot: dot(5) },
+  refund: { label: '退款分析', desc: '退款率与原因归类', dot: dot(6) },
+  dim: { label: '维度字典', desc: '品类与指标口径', dot: dot(3) }
+}
+
+const layerNodes = computed(() => {
+  const ids = [...new Set(visibleCards.value.map((c) => c.categoryId))].slice(0, 4)
+  return ids.map((id, i) => {
+    const meta = layerMeta[id] || { label: id, desc: '数据分类', dot: dot(7) }
+    const count = visibleCards.value.filter((c) => c.categoryId === id).length
+    return {
+      id: 'layer-' + id, kind: 'layer', categoryId: id,
+      label: meta.label, desc: meta.desc, dot: meta.dot,
+      count, level: count <= 2 ? 'simple' : 'moderate',
+      x: layerSlots[i % layerSlots.length].x,
+      y: layerSlots[i % layerSlots.length].y,
+      delay: -(i * 1.3)
+    }
+  })
+})
+const fileNodes = computed(() => visibleCards.value.slice(0, fileSlots.length).map((c, i) => ({
+  ...c,
+  kind: 'file',
+  x: fileSlots[i % fileSlots.length].x,
+  y: fileSlots[i % fileSlots.length].y,
+  delay: -(i * 0.9 + 0.4)
+})))
+
+/* 连线：每个文件节点接到同分类的层节点 */
+const edges = computed(() => {
+  const out = []
+  for (const f of fileNodes.value) {
+    const l = layerNodes.value.find((n) => n.categoryId === f.categoryId)
+    if (!l) continue
+    const x1 = l.x + NODE_W
+    const y1 = l.y + LAYER_H / 2
+    const x2 = f.x
+    const y2 = f.y + FILE_H / 2
+    const mx = (x1 + x2) / 2
+    out.push({
+      id: l.id + '-' + f.id,
+      d: `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`,
+      dot: l.dot
+    })
+  }
+  return out
+})
+
+function nodeStyle(n) {
+  return {
+    left: (n.x / VW * 100) + '%',
+    top: (n.y / VH * 100) + '%',
+    '--float-delay': n.delay + 's'
+  }
+}
+function zoomBy(delta) {
+  zoom.value = Math.min(1.4, Math.max(0.6, Math.round((zoom.value + delta) * 10) / 10))
+}
+
+/* ---------- 打开文件 / 点击层节点筛选 ---------- */
 async function openFile(card) {
   if (!card.real) { toast('这是演示数据，没有对应的 Excel 文件'); return }
   const relative = card.real.filePath || [...card.segments, card.real.origName].join('/')
@@ -195,71 +275,109 @@ async function openFile(card) {
   try { const err = await result; if (err) toast('打开失败：' + err) }
   catch (e) { toast('打开失败：' + e.message) }
 }
+function pickLayer(n) {
+  activePill.value = activePill.value === n.categoryId ? 'all' : n.categoryId
+}
 </script>
 
 <template>
-  <div class="kb-scope kb-page">
-    <div class="kb-view">
-      <div class="kb-container">
-        <!-- 标题区 -->
-        <div class="kb-head">
-          <div class="kb-eyebrow">Reports</div>
-          <h1>数据报表</h1>
-          <p>悬浮筛选、分类胶囊与文件卡片，聚焦你关心的数据资产。</p>
-        </div>
-
-        <div class="kb-card">
-          <!-- 卡片顶行：面包屑 + 筛选 + 计数 -->
-          <div class="kb-card-top">
-            <nav class="kb-crumb" aria-label="面包屑">
-              <button type="button" class="kb-crumb-item"
-                      :class="{ here: activePill === 'all' }" @click="activePill = 'all'">全部数据</button>
-              <template v-if="activePill !== 'all'">
-                <span class="kb-crumb-sep">/</span>
-                <button type="button" class="kb-crumb-item here">{{ currentPill.label }}</button>
-              </template>
-            </nav>
-
-            <FilterPanel v-model="selected" :groups="groups" />
-
-            <span class="kb-count">{{ categoryCount }} 个分类 · {{ visibleCards.length }} 个文件</span>
+  <div class="kb-scope kb-page kb-graph-page">
+    <div class="kb-canvas">
+      <!-- 悬浮控制条：面包屑 / 筛选 / 计数 / 胶囊条 -->
+      <div class="kb-graph-bar">
+        <div class="kb-graph-bar-row">
+          <div class="kb-graph-title">
+            <span class="kb-eyebrow">Reports</span>
+            <h1>数据报表</h1>
           </div>
+          <nav class="kb-crumb" aria-label="面包屑">
+            <button type="button" class="kb-crumb-item"
+                    :class="{ here: activePill === 'all' }" @click="activePill = 'all'">全部数据</button>
+            <template v-if="activePill !== 'all'">
+              <span class="kb-crumb-sep">/</span>
+              <button type="button" class="kb-crumb-item here">{{ currentPill.label }}</button>
+            </template>
+          </nav>
+          <FilterPanel v-model="selected" :groups="groups" />
+          <span class="kb-count">{{ categoryCount }} 个分类 · {{ visibleCards.length }} 个文件</span>
+        </div>
+        <CategoryPills
+          :pills="pills" :active-id="activePill"
+          :legend="legend" :active-legend="activeLegend"
+          @select="activePill = $event"
+          @select-legend="activeLegend = activeLegend === $event ? '' : $event"
+        />
+      </div>
 
-          <!-- 组件B：分类胶囊条 + 层图例 -->
-          <CategoryPills
-            :pills="pills" :active-id="activePill"
-            :legend="legend" :active-legend="activeLegend"
-            @select="activePill = $event"
-            @select-legend="activeLegend = activeLegend === $event ? '' : $event"
-          />
+      <!-- 悬浮画布世界：节点 + 连线一起缩放 -->
+      <div class="kb-world" :style="{ transform: 'scale(' + zoom + ')' }">
+        <svg class="kb-edges" :viewBox="`0 0 ${VW} ${VH}`" preserveAspectRatio="none" aria-hidden="true">
+          <path v-for="e in edges" :key="e.id" :d="e.d" class="kb-edge" />
+        </svg>
 
-          <!-- 文件卡片 -->
-          <div v-if="loading" class="kb-empty">正在读取数据…</div>
-          <div v-else-if="!visibleCards.length" class="kb-empty">
+        <div v-if="loading" class="kb-empty">正在读取数据…</div>
+        <template v-else-if="!visibleCards.length">
+          <div class="kb-empty">
             <div class="big">∅</div>
             <div>当前筛选条件下没有数据</div>
             <div class="small"><button type="button" class="kb-card-open" @click="resetFilters">清除筛选</button></div>
           </div>
-          <div v-else class="kb-grid">
-            <article v-for="c in visibleCards" :key="c.id" class="kb-fcard">
-              <div class="kb-fcard-top">
-                <span class="kb-fcard-ico"><Icon name="file" :size="16" /></span>
-                <span class="kb-fcard-kind">Excel</span>
-                <span class="kb-fcard-time">{{ c.time }}</span>
-              </div>
-              <h3 class="kb-fcard-title">{{ c.title }}</h3>
-              <div class="kb-tags">
-                <span v-for="tag in c.tags" :key="tag" class="kb-tag">{{ tag }}</span>
-              </div>
-              <div class="kb-fcard-foot">
-                <span>{{ c.tableCount }} 张表</span>
-                <button type="button" class="kb-card-open" @click="openFile(c)">
-                  打开 <Icon name="external" :size="14" />
-                </button>
-              </div>
-            </article>
-          </div>
-        </div>
+        </template>
+        <template v-else>
+          <!-- 分类层节点 -->
+          <button v-for="n in layerNodes" :key="n.id" type="button"
+                  class="kb-node kb-layer" :class="{ 'is-active': activePill === n.categoryId }"
+                  :style="nodeStyle(n)" @click="pickLayer(n)">
+            <span class="kb-layer-stripe" :style="{ background: n.dot }"></span>
+            <span class="kb-layer-top">
+              <span class="kb-node-eyebrow">Layer</span>
+              <span class="kb-layer-level">{{ n.level }}</span>
+            </span>
+            <span class="kb-layer-name">{{ n.label }}</span>
+            <span class="kb-layer-desc">{{ n.desc }}</span>
+            <span class="kb-layer-foot">{{ n.count }} files <span class="kb-layer-arrow">→</span></span>
+            <span class="kb-port kb-port-r"></span>
+            <span class="kb-port kb-port-b"></span>
+          </button>
+
+          <!-- 文件节点 -->
+          <article v-for="n in fileNodes" :key="'f' + n.id" class="kb-node kb-fnode"
+                   :style="nodeStyle(n)">
+            <span class="kb-port kb-port-l"></span>
+            <div class="kb-fcard-top">
+              <span class="kb-fcard-ico"><Icon name="file" :size="16" /></span>
+              <span class="kb-fcard-kind">Excel</span>
+              <span class="kb-fcard-time">{{ n.time }}</span>
+            </div>
+            <h3 class="kb-fcard-title">{{ n.title }}</h3>
+            <div class="kb-tags">
+              <span v-for="tag in n.tags" :key="tag" class="kb-tag">{{ tag }}</span>
+            </div>
+            <div class="kb-fcard-foot">
+              <span>{{ n.tableCount }} 张表</span>
+              <button type="button" class="kb-card-open" @click="openFile(n)">
+                打开 <Icon name="external" :size="14" />
+              </button>
+            </div>
+          </article>
+        </template>
+      </div>
+
+      <!-- 左下缩放控件 -->
+      <div class="kb-zoom" aria-label="画布缩放">
+        <button type="button" aria-label="缩小" @click="zoomBy(-0.1)">−</button>
+        <span>{{ Math.round(zoom * 100) }}%</span>
+        <button type="button" aria-label="放大" @click="zoomBy(0.1)">+</button>
+        <button type="button" class="fit" @click="zoom = 1">适配</button>
+      </div>
+
+      <!-- 右下迷你图 -->
+      <div class="kb-minimap" aria-hidden="true">
+        <span v-for="n in layerNodes" :key="'ml' + n.id" class="kb-mm-layer"
+              :style="{ left: (n.x / VW * 100) + '%', top: (n.y / VH * 100) + '%', background: n.dot }"></span>
+        <span v-for="n in fileNodes" :key="'mf' + n.id" class="kb-mm-file"
+              :style="{ left: (n.x / VW * 100) + '%', top: (n.y / VH * 100) + '%' }"></span>
+        <span class="kb-mm-view"></span>
       </div>
     </div>
   </div>

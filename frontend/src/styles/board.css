@@ -324,6 +324,189 @@
   }
 }
 
+/* ============================================================
+ * 全屏悬浮画布（数据报表 / 知识图谱）
+ * 节点散布、轻微漂浮、贝塞尔连线；无外层卡片边框束缚
+ * ============================================================ */
+.kb-scope.kb-graph-page {
+  display: block;
+  min-height: calc(100vh - 56px);
+}
+.kb-canvas {
+  position: relative;
+  width: 100%;
+  height: calc(100vh - 56px);
+  min-height: 640px;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* 悬浮控制条：面包屑 / 筛选 / 计数 / 胶囊条 */
+.kb-graph-bar {
+  position: absolute;
+  top: 24px; left: 32px; right: 32px;
+  z-index: 20;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
+  padding: 16px 24px 12px;
+}
+.kb-graph-bar-row {
+  display: flex; align-items: center; gap: 16px;
+}
+.kb-graph-title { display: flex; flex-direction: column; flex: 0 0 auto; }
+.kb-graph-title h1 { margin: 4px 0 0; font-size: 22px; line-height: 1.2; font-weight: 700; color: var(--title); }
+
+/* 画布世界：节点 + 连线，整体缩放 */
+.kb-world {
+  position: absolute; inset: 0;
+  transform-origin: 50% 40%;
+  transition: transform .25s ease;
+}
+.kb-edges {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+.kb-edge {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1.6;
+  stroke-dasharray: 5 5;
+  opacity: .9;
+}
+
+/* 通用节点：轻微漂浮，各有错峰延迟 */
+.kb-node {
+  position: absolute;
+  width: 240px;
+  animation: kb-float 7s ease-in-out infinite;
+  animation-delay: var(--float-delay, 0s);
+  transition: box-shadow .2s ease, border-color .2s ease;
+}
+@keyframes kb-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-9px); }
+}
+
+/* 分类层节点（对应截图 LAYER 卡） */
+.kb-layer {
+  display: block; text-align: left;
+  min-height: 118px;
+  padding: 16px 18px 14px 22px;
+  background: var(--inner);
+  border: 1px solid var(--line);
+  border-radius: var(--r-inner);
+  box-shadow: var(--shadow-card);
+  color: var(--title);
+}
+.kb-layer:hover, .kb-layer.is-active {
+  box-shadow: var(--shadow-pop);
+  border-color: var(--soft);
+}
+.kb-layer.is-active { background: var(--soft); }
+.kb-layer-stripe {
+  position: absolute; left: 0; top: 14px; bottom: 14px;
+  width: 4px; border-radius: 0 4px 4px 0;
+}
+.kb-layer-top { display: flex; align-items: center; justify-content: space-between; }
+.kb-node-eyebrow {
+  font-size: 10px; font-weight: 700; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--eyebrow);
+}
+.kb-layer-level {
+  font-size: 10px; font-weight: 600; letter-spacing: .04em;
+  color: var(--t3); font-family: var(--mono, monospace);
+}
+.kb-layer-name {
+  display: block; margin-top: 12px;
+  font-size: 15px; font-weight: 700; color: var(--title); line-height: 1.4;
+}
+.kb-layer-desc {
+  display: block; margin-top: 6px;
+  font-size: 11px; line-height: 1.6; color: var(--t2);
+}
+.kb-layer-foot {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 12px; font-size: 11px; color: var(--t3);
+}
+.kb-layer-arrow { color: var(--accent); font-weight: 700; }
+
+/* 文件节点 */
+.kb-fnode {
+  display: flex; flex-direction: column; gap: 12px;
+  min-height: 152px;
+  padding: 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r-inner);
+  box-shadow: var(--shadow-card);
+}
+.kb-fnode:hover { box-shadow: var(--shadow-pop); }
+
+/* 连接端口 */
+.kb-port {
+  position: absolute; width: 8px; height: 8px;
+  border-radius: 50%; background: var(--card);
+  border: 2px solid var(--dot-2);
+}
+.kb-port-r { right: -5px; top: 50%; margin-top: -4px; }
+.kb-port-l { left: -5px; top: 50%; margin-top: -4px; }
+.kb-port-b { bottom: -5px; left: 50%; margin-left: -4px; }
+
+/* 左下缩放控件 */
+.kb-zoom {
+  position: absolute; left: 24px; bottom: 24px; z-index: 20;
+  display: flex; align-items: center; gap: 4px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+  padding: 4px;
+}
+.kb-zoom button {
+  width: 28px; height: 28px;
+  border: 0; border-radius: 6px;
+  background: transparent; color: var(--t2);
+  font-size: 16px; line-height: 1;
+  transition: background .15s ease, color .15s ease;
+}
+.kb-zoom button:hover { background: var(--inner); color: var(--accent); }
+.kb-zoom span {
+  min-width: 42px; text-align: center;
+  font-size: 11px; color: var(--t2); font-variant-numeric: tabular-nums;
+}
+.kb-zoom button.fit {
+  width: auto; padding: 0 10px; font-size: 11px;
+}
+
+/* 右下迷你图 */
+.kb-minimap {
+  position: absolute; right: 24px; bottom: 24px; z-index: 15;
+  width: 168px; height: 104px;
+  background: var(--inner);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+.kb-mm-layer, .kb-mm-file { position: absolute; border-radius: 2px; }
+.kb-mm-layer { width: 10px; height: 6px; opacity: .85; }
+.kb-mm-file { width: 7px; height: 5px; background: var(--t3); opacity: .55; }
+.kb-mm-view {
+  position: absolute; left: 8%; top: 10%; width: 84%; height: 80%;
+  border: 1px solid var(--accent); border-radius: 4px; opacity: .4;
+}
+
+@media (max-width: 900px) {
+  .kb-graph-bar { left: 16px; right: 16px; top: 16px; padding: 12px 16px; }
+  .kb-graph-bar-row { flex-wrap: wrap; gap: 8px 16px; }
+  .kb-count { margin-left: 0; }
+  .kb-minimap { display: none; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .kb-scope * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
 }
