@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, inject } from 'vue'
+import { useRouter } from 'vue-router'
 import { fetchConfig, fetchReport, downloadExcel, openLocalExcel } from '@/api'
 import Icon from '@/components/Icon.vue'
 import FilterPanel from '@/components/FilterPanel.vue'
@@ -12,6 +13,7 @@ import CategoryPills from '@/components/CategoryPills.vue'
  * - 筛选维度是与数据内容无关的客观属性（表数/行数/状态/时间），不绑定某个业务域。
  */
 const toast = inject('toast', () => {})
+const router = useRouter()
 const loading = ref(true)
 const workspaceRoot = ref('')
 const tree = ref([])              // 后端原始分类树
@@ -220,6 +222,11 @@ async function openFile(card) {
 function pickLayer(n) {
   activePill.value = activePill.value === n.categoryId ? 'all' : n.categoryId
 }
+
+/** 点「进入对话」：带着分类 id 与中文名跳转，ChatView 按 id 找回专属会话 */
+function chatWithCategory(n) {
+  router.push({ path: '/chat', query: { categoryId: n.categoryId, categoryName: n.label } })
+}
 </script>
 
 <template>
@@ -259,10 +266,10 @@ function pickLayer(n) {
           <div class="small"><button type="button" class="kb-card-open" @click="resetFilters">清除筛选</button></div>
         </div>
         <template v-else>
-          <!-- 大分类节点：名称来自后端 category.name -->
-          <button v-for="n in layerNodes" :key="n.id" type="button"
-                  class="kb-node kb-layer" :class="{ 'is-active': activePill === n.categoryId }"
-                  :style="nodeStyle(n)" @click="pickLayer(n)">
+          <!-- 大分类节点：名称来自后端 category.name；点「进入对话」打开该分类专属会话 -->
+          <article v-for="n in layerNodes" :key="n.id"
+                   class="kb-node kb-layer" :class="{ 'is-active': activePill === n.categoryId }"
+                   :style="nodeStyle(n)" @click="pickLayer(n)">
             <span class="kb-layer-stripe" :style="{ background: n.dot }"></span>
             <span class="kb-layer-top">
               <span class="kb-node-eyebrow">Layer</span>
@@ -270,10 +277,15 @@ function pickLayer(n) {
             </span>
             <span class="kb-layer-name">{{ n.label }}</span>
             <span class="kb-layer-desc">{{ n.desc }}</span>
-            <span class="kb-layer-foot">{{ n.count }} files <span class="kb-layer-arrow">→</span></span>
+            <span class="kb-layer-foot">
+              <span>{{ n.count }} files</span>
+              <button type="button" class="kb-chat-entry" @click.stop="chatWithCategory(n)">
+                进入对话 <span class="kb-layer-arrow">→</span>
+              </button>
+            </span>
             <span class="kb-port kb-port-r"></span>
             <span class="kb-port kb-port-b"></span>
-          </button>
+          </article>
 
           <!-- 文件节点 -->
           <article v-for="n in fileNodes" :key="'f' + n.id" class="kb-node kb-fnode"

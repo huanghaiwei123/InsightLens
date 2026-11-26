@@ -6,13 +6,10 @@ import Icon from '@/components/Icon.vue'
 
 const route = useRoute()
 const tabs = [
-  { path: '/', label: '概览', icon: 'overview' },
+  { path: '/home', label: '概览', icon: 'overview' },
+  { path: '/report', label: '数据报表', icon: 'report' },
   { path: '/chat', label: '对话', icon: 'chat' },
   { path: '/upload', label: '上传文件', icon: 'upload' },
-  { path: '/report', label: '数据报表', icon: 'report' },
-  { path: '/assets', label: '数据资产', icon: 'assets' },
-  { path: '/trace', label: '处理轨迹', icon: 'report' },
-  { path: '/quality', label: '质量看板', icon: 'quality' },
   { path: '/settings', label: '设置', icon: 'settings' }
 ]
 const serviceOk = ref(false)

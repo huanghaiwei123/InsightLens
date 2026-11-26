@@ -394,17 +394,19 @@
 /* 分类层节点（对应截图 LAYER 卡） */
 .kb-layer {
   display: block; text-align: left;
-  min-height: 118px;
+  min-height: 128px;
   padding: 16px 18px 14px 22px;
   background: var(--inner);
   border: 1px solid var(--line);
   border-radius: var(--r-inner);
   box-shadow: var(--shadow-card);
   color: var(--title);
+  cursor: pointer;
 }
 .kb-layer:hover, .kb-layer.is-active {
   box-shadow: var(--shadow-pop);
   border-color: var(--soft);
+  transform: translateY(-2px);
 }
 .kb-layer.is-active { background: var(--soft); }
 .kb-layer-stripe {
@@ -429,10 +431,19 @@
   font-size: 11px; line-height: 1.6; color: var(--t2);
 }
 .kb-layer-foot {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
   margin-top: 12px; font-size: 11px; color: var(--t3);
 }
-.kb-layer-arrow { color: var(--accent); font-weight: 700; }
+.kb-chat-entry {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 10px; border: 0; border-radius: 999px;
+  background: var(--soft); color: var(--accent);
+  font: inherit; font-size: 11px; font-weight: 700; cursor: pointer;
+  transition: background .18s ease, transform .18s ease;
+}
+.kb-chat-entry:hover { background: var(--accent); color: #fff; transform: translateX(2px); }
+.kb-layer-arrow { color: inherit; font-weight: 700; }
+.kb-chat-entry:hover .kb-layer-arrow { color: #fff; }
 
 /* 文件节点 */
 .kb-fnode {

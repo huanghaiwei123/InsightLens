@@ -1,13 +1,22 @@
 <script setup>
-import { ref, inject, nextTick, onMounted } from 'vue'
-import { createSession, chatStream } from '@/api'
+import { ref, computed, inject, nextTick, watch, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { createSession, chatStream, fetchHistory } from '@/api'
+import { sessionFor, rememberSession, forgetSession } from '@/store/chatSessions'
 
 const toast = inject('toast')
+const route = useRoute()
+const router = useRouter()
+
+const categoryId = computed(() => route.query.categoryId || null)
+const categoryName = computed(() => route.query.categoryName || '通用对话')
+
 const sessionId = ref(null)
 const messages = ref([])   // { role: 'user'|'bot', text, trace: [] }
 const input = ref('')
 const streaming = ref(false)
 const listEl = ref(null)
+const historyLoading = ref(false)
 let abort = null
 
 const NODE_LABEL = {
@@ -16,9 +25,38 @@ const NODE_LABEL = {
   summarize: '整理回答', react: '思考中'
 }
 
+/**
+ * 每个大分类绑定一个独立会话。切换分类时按映射找回上次会话并回填历史，
+ * 没有绑定过就留空，等首次提问时才创建，避免留下空会话。
+ */
+async function activateCategory() {
+  if (streaming.value) stop()
+  sessionId.value = sessionFor(categoryId.value)
+  messages.value = []
+  if (!sessionId.value) return
+  historyLoading.value = true
+  try {
+    const rows = await fetchHistory(sessionId.value)
+    messages.value = (rows || []).map((r) => ({
+      role: r.role === 'user' ? 'user' : 'bot',
+      text: r.text || '',
+      trace: []
+    }))
+    scrollBottom()
+  } catch (e) {
+    toast('历史加载失败：' + e.message)
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+watch(categoryId, activateCategory)
+onMounted(activateCategory)
+
 async function ensureSession() {
   if (sessionId.value) return
-  sessionId.value = await createSession()
+  sessionId.value = await createSession(categoryId.value)
+  rememberSession(categoryId.value, sessionId.value)
 }
 
 async function send() {
@@ -63,32 +101,37 @@ function stop() {
 function clear() {
   if (streaming.value) stop()
   messages.value = []
+  forgetSession(categoryId.value)
   sessionId.value = null
-  toast('已清空当前对话')
+  toast('已清空当前分类的对话')
+}
+
+function backToCategories() {
+  router.push('/report')
 }
 
 function scrollBottom() {
   nextTick(() => { if (listEl.value) listEl.value.scrollTop = listEl.value.scrollHeight })
 }
-
-onMounted(() => { /* 会话首次提问时再创建，避免留下空窗口 */ })
 </script>
 
 <template>
-  <div class="wrap">
+  <div class="wrap chat-page">
     <div class="page-head">
-      <div class="kicker">Chat</div>
-      <h1>直接问你的数据</h1>
-      <p>用日常语言描述你想知道的事。回答会一段段显示出来，显示完就可以接着追问。</p>
+      <button type="button" class="btn ghost chat-back" @click="backToCategories">← 返回分类</button>
+      <div class="kicker">Chat · {{ categoryName }}</div>
+      <h1>和「{{ categoryName }}」对话</h1>
+      <p>这个分类有独立的对话与检索范围。切换分类后再回来，之前的提问和回答都还在。</p>
     </div>
 
     <div class="card">
       <div class="chat-layout">
         <div class="msg-list" ref="listEl">
-          <div v-if="!messages.length" class="empty">
+          <div v-if="historyLoading" class="empty">正在恢复这段对话…</div>
+          <div v-else-if="!messages.length" class="empty">
             <div class="big">✦</div>
             <div>还没有开始对话</div>
-            <div class="small" style="margin-top:8px">试试问：「各分类的数据有多少行？」</div>
+            <div class="small" style="margin-top:8px">试试问：「这个分类里有哪些数据？」</div>
           </div>
           <div v-for="(m, i) in messages" :key="i" class="msg" :class="m.role">
             <div class="avatar">{{ m.role === 'user' ? '我' : '◈' }}</div>
@@ -104,9 +147,9 @@ onMounted(() => { /* 会话首次提问时再创建，避免留下空窗口 */ }
                     @keydown.enter.exact.prevent="send" :disabled="streaming"></textarea>
           <button v-if="streaming" class="btn ghost" @click="stop">停止</button>
           <button v-else class="btn primary" @click="send" :disabled="!input.trim()">发送</button>
-          <button class="btn ghost" @click="clear" title="清空当前对话">清空</button>
+          <button class="btn ghost" @click="clear" title="清空当前分类的对话">清空</button>
         </div>
-        <div class="small muted">单次回答最长等待约 2 分钟。历史不会长期保存，清空后无法恢复。</div>
+        <div class="small muted">单次回答最长等待约 2 分钟。历史保存在本机，清空后无法恢复。</div>
       </div>
     </div>
   </div>
