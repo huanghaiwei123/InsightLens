@@ -7,184 +7,129 @@ import CategoryPills from '@/components/CategoryPills.vue'
 
 /**
  * 数据报表 / 知识图谱仪表板（全屏悬浮画布）
- * - 画布铺满视口，节点散布、轻微漂浮，节点间连线，无外层边框束缚
- * - 配色沿用米白暖橙规范；筛选/胶囊/图例浮在画布上方
- * - 数据策略：优先真实分类，接口为空或失败回落 mock
+ * - 分类完全来自后端 /personal/report/categories：大分类 = category.name（中文），
+ *   小分类 = file_path 的目录层级；前端不预设任何业务分类，任何数据上传后都能显示。
+ * - 筛选维度是与数据内容无关的客观属性（表数/行数/状态/时间），不绑定某个业务域。
  */
 const toast = inject('toast', () => {})
 const loading = ref(true)
 const workspaceRoot = ref('')
-const cards = ref([])
+const tree = ref([])              // 后端原始分类树
 const selected = ref(new Set())
 const activePill = ref('all')
-const activeLegend = ref('')
 const zoom = ref(1)
 
 const dot = (n) => `var(--dot-${n})`
 
-/* ---------- 筛选维度（4 组，计数从当前卡片实时统计） ---------- */
+function fmtTime(t) { return t ? String(t).replace('T', ' ').slice(11, 16) : '' }
+function fmtRows(n) {
+  if (!n) return '0'
+  return n >= 10000 ? (n / 10000).toFixed(1) + ' 万' : String(n)
+}
+function timeBucket(t) {
+  if (!t) return 'old'
+  const days = (Date.now() - new Date(String(t).replace(' ', 'T')).getTime()) / 86400000
+  if (days <= 7) return '7d'
+  if (days <= 30) return '30d'
+  return 'old'
+}
+
+/* ---------- 递归收集文件：带上所属大分类 id 与目录层级 ---------- */
+function collectFiles(nodes, categoryId, path = []) {
+  const out = []
+  for (const n of nodes || []) {
+    const seg = [...path, n.name]
+    for (const f of n.files || []) out.push({ file: f, categoryId, segments: seg })
+    out.push(...collectFiles(n.children || [], categoryId, seg))
+  }
+  return out
+}
+const allEntries = computed(() => tree.value.flatMap((n) => collectFiles([n], String(n.id))))
+
+/* 文件的客观属性 → 筛选 facets（与数据内容无关，任何上传都适用） */
+function facetsOf(file) {
+  const sheets = file.sheets || []
+  const rows = sheets.reduce((s, x) => s + (x.rowCount || 0), 0)
+  return [
+    sheets.length <= 1 ? 'single' : 'multi',
+    rows < 10000 ? 'small' : (rows < 100000 ? 'medium' : 'large'),
+    sheets.every((s) => s.status === 'success') ? 'ok' : 'warn',
+    timeBucket(file.createdAt)
+  ]
+}
+
+/* ---------- 组件A：4 组通用筛选维度（不绑定业务域） ---------- */
 const filterDefs = [
   {
-    title: '数据类型',
+    title: '文件规模',
     options: [
-      { id: 'eval', label: '评测数据', dot: dot(1) },
-      { id: 'biz', label: '业务明细', dot: dot(2) },
-      { id: 'dim', label: '维度字典', dot: dot(3) },
-      { id: 'log', label: '运行日志', dot: dot(4) }
+      { id: 'single', label: '单张表', dot: dot(1) },
+      { id: 'multi', label: '多张表', dot: dot(2) }
     ]
   },
   {
-    title: '数据来源',
+    title: '数据行数',
     options: [
-      { id: 'upload', label: '本地上传', dot: dot(5) },
-      { id: 'db', label: '数据库连接', dot: dot(6) },
-      { id: 'mcp', label: 'MCP 联网', dot: dot(7) }
+      { id: 'small', label: '1 万行以下', dot: dot(3) },
+      { id: 'medium', label: '1-10 万行', dot: dot(4) },
+      { id: 'large', label: '10 万行以上', dot: dot(5) }
     ]
   },
   {
-    title: '状态',
+    title: '表状态',
     options: [
-      { id: 'ready', label: '已归类', dot: dot(4) },
-      { id: 'check', label: '待校验', dot: dot(2) },
-      { id: 'archive', label: '已归档', dot: dot(7) }
+      { id: 'ok', label: '全部成功', dot: dot(4) },
+      { id: 'warn', label: '含待校验', dot: dot(2) }
     ]
   },
   {
-    title: '时间范围',
+    title: '上传时间',
     options: [
       { id: '7d', label: '近 7 天', dot: dot(1) },
       { id: '30d', label: '近 30 天', dot: dot(3) },
-      { id: '90d', label: '近 90 天', dot: dot(5) },
       { id: 'old', label: '更早', dot: dot(6) }
     ]
   }
 ]
 const groups = computed(() => filterDefs.map((g) => ({
   title: g.title,
-  options: g.options.map((o) => ({ ...o, count: cards.value.filter((c) => c.facets.includes(o.id)).length }))
+  options: g.options.map((o) => ({
+    ...o,
+    count: allEntries.value.filter((e) => facetsOf(e.file).includes(o.id)).length
+  }))
 })))
 
-/* ---------- 分类胶囊 / 层图例 ---------- */
-const pillDefs = [
+/* ---------- 组件B：胶囊条直接来自后端大分类的中文名 ---------- */
+const pills = computed(() => [
   { id: 'all', label: '全部数据', dot: dot(1) },
-  { id: 'eval', label: '评测数据', dot: dot(2) },
-  { id: 'biz', label: '电商运营', dot: dot(4) },
-  { id: 'order', label: '历史订单', dot: dot(5) },
-  { id: 'refund', label: '退款分析', dot: dot(6) },
-  { id: 'dim', label: '维度字典', dot: dot(3) }
-]
-const pills = computed(() => pillDefs.map((p) => ({
-  ...p,
-  disabled: p.id !== 'all' && !cards.value.some((c) => c.categoryId === p.id)
-})))
-const legendDefs = [
-  { id: 'data', label: '数据层', dot: dot(1) },
-  { id: 'biz', label: '业务层', dot: dot(4) },
-  { id: 'time', label: '时间层', dot: dot(5) },
-  { id: 'state', label: '状态层', dot: dot(6) }
-]
-const legend = computed(() => legendDefs.map((l) => ({
-  ...l, count: cards.value.filter((c) => c.layerId === l.id).length
-})))
-
-/* ---------- 内置 mock ---------- */
-const mockCards = [
-  {
-    id: 'm1', title: '评测基准集 · 电商问数',
-    tags: ['评测数据', '本地上传', '已归类'], tableCount: 3,
-    facets: ['eval', 'upload', 'ready', '7d'], categoryId: 'eval', layerId: 'data',
-    time: '16:32', createdAt: '2026-11-24 16:32', real: null, segments: []
-  },
-  {
-    id: 'm2', title: '订单明细 · 近 90 天快照',
-    tags: ['业务明细', '数据库连接', '待校验'], tableCount: 2,
-    facets: ['biz', 'db', 'check', '90d'], categoryId: 'order', layerId: 'biz',
-    time: '09:18', createdAt: '2026-11-21 09:18', real: null, segments: []
-  },
-  {
-    id: 'm3', title: '品类口径词典 v0.3',
-    tags: ['维度字典', '本地上传', '已归档'], tableCount: 1,
-    facets: ['dim', 'upload', 'archive', '30d'], categoryId: 'dim', layerId: 'time',
-    time: '14:05', createdAt: '2026-11-18 14:05', real: null, segments: []
-  }
-]
-
-/* ---------- 真实数据 → 卡片 ---------- */
-function fmtTime(t) { return t ? String(t).replace('T', ' ').slice(11, 16) : '' }
-function timeBucket(t) {
-  if (!t) return 'old'
-  const days = (Date.now() - new Date(String(t).replace(' ', 'T')).getTime()) / 86400000
-  if (days <= 7) return '7d'
-  if (days <= 30) return '30d'
-  if (days <= 90) return '90d'
-  return 'old'
-}
-function matchPill(text) {
-  if (/评测/.test(text)) return 'eval'
-  if (/退款/.test(text)) return 'refund'
-  if (/维度|字典|口径/.test(text)) return 'dim'
-  if (/订单|历史/.test(text)) return 'order'
-  if (/电商|运营/.test(text)) return 'biz'
-  return 'biz'
-}
-function flatten(nodes, path = []) {
-  const out = []
-  for (const n of nodes || []) {
-    const seg = [...path, n.name]
-    for (const f of n.files || []) out.push({ file: f, segments: seg })
-    out.push(...flatten(n.children || [], seg))
-  }
-  return out
-}
-function toCard(entry, i) {
-  const text = [...entry.segments, entry.file.origName || ''].join('/')
-  const type = /评测/.test(text) ? 'eval' : (/维度|字典|口径/.test(text) ? 'dim' : 'biz')
-  const typeLabel = { eval: '评测数据', dim: '维度字典', biz: '业务明细' }[type]
-  const bucket = timeBucket(entry.file.createdAt)
-  const bucketLabel = { '7d': '近 7 天', '30d': '近 30 天', '90d': '近 90 天', old: '更早' }[bucket]
-  return {
-    id: entry.file.uploadId || `r${i}`,
-    title: entry.file.origName || '未命名文件',
-    tags: [typeLabel, '本地上传', '已归类', bucketLabel].slice(0, 3),
-    tableCount: (entry.file.sheets || []).length,
-    facets: [type, 'upload', 'ready', bucket],
-    categoryId: matchPill(text),
-    layerId: type === 'eval' ? 'data' : (type === 'dim' ? 'time' : 'biz'),
-    time: fmtTime(entry.file.createdAt),
-    createdAt: entry.file.createdAt,
-    real: entry.file,
-    segments: entry.segments
-  }
-}
+  ...tree.value.map((n, i) => ({ id: String(n.id), label: n.name, dot: dot((i % 7) + 1) }))
+])
+const currentPill = computed(() => pills.value.find((p) => p.id === activePill.value) || pills.value[0])
 
 onMounted(() => {
   Promise.all([fetchReport().catch(() => []), fetchConfig().catch(() => null)])
-    .then(([tree, config]) => {
+    .then(([data, config]) => {
       workspaceRoot.value = config?.workspaceRoot || ''
-      const real = flatten(tree).map(toCard)
-      // 真实数据优先；并入 mock 演示节点铺满画布（按文件名去重），形成图谱视图
-      const seen = new Set(real.map((c) => c.title))
-      cards.value = [...real, ...mockCards.filter((c) => !seen.has(c.title))]
+      tree.value = Array.isArray(data) ? data : []
       loading.value = false
     })
-    .catch(() => { cards.value = mockCards; loading.value = false })
+    .catch(() => { tree.value = []; loading.value = false })
 })
 
-/* ---------- 过滤：组内 OR，组间 AND ---------- */
-const visibleCards = computed(() => cards.value.filter((c) => {
-  if (activePill.value !== 'all' && c.categoryId !== activePill.value) return false
-  if (activeLegend.value && c.layerId !== activeLegend.value) return false
+/* ---------- 过滤：组内 OR，组间 AND，再叠加胶囊 ---------- */
+const visibleEntries = computed(() => allEntries.value.filter((e) => {
+  if (activePill.value !== 'all' && e.categoryId !== activePill.value) return false
+  const facets = facetsOf(e.file)
   for (const g of filterDefs) {
     const picked = g.options.filter((o) => selected.value.has(o.id)).map((o) => o.id)
-    if (picked.length && !picked.some((id) => c.facets.includes(id))) return false
+    if (picked.length && !picked.some((id) => facets.includes(id))) return false
   }
   return true
 }))
-const categoryCount = computed(() => new Set(visibleCards.value.map((c) => c.categoryId)).size)
-const currentPill = computed(() => pillDefs.find((p) => p.id === activePill.value) || pillDefs[0])
-function resetFilters() { selected.value = new Set(); activePill.value = 'all'; activeLegend.value = '' }
+const categoryCount = computed(() => new Set(visibleEntries.value.map((e) => e.categoryId)).size)
+function resetFilters() { selected.value = new Set(); activePill.value = 'all' }
 
-/* ---------- 画布节点：分类层节点 + 文件节点 ---------- */
+/* ---------- 画布节点：大分类节点 + 文件节点 ---------- */
 const VW = 1200
 const VH = 720
 const NODE_W = 240
@@ -192,44 +137,43 @@ const LAYER_H = 118
 const FILE_H = 152
 
 const layerSlots = [
-  { x: 64, y: 268 }, { x: 470, y: 232 }, { x: 884, y: 270 }, { x: 300, y: 528 }
+  { x: 96, y: 258 }, { x: 480, y: 224 }, { x: 880, y: 262 }, { x: 300, y: 520 }
 ]
 const fileSlots = [
-  { x: 70, y: 430 }, { x: 430, y: 470 }, { x: 820, y: 430 },
-  { x: 248, y: 566 }, { x: 610, y: 566 }, { x: 930, y: 566 }
+  { x: 108, y: 424 }, { x: 492, y: 462 }, { x: 884, y: 424 },
+  { x: 280, y: 566 }, { x: 640, y: 566 }, { x: 940, y: 566 }
 ]
-const layerMeta = {
-  eval: { label: '评测基准', desc: '问数基准集与评分口径', dot: dot(1) },
-  biz: { label: '电商运营', desc: '运营明细与业务指标', dot: dot(4) },
-  order: { label: '历史订单', desc: '近 90 天订单快照', dot: dot(5) },
-  refund: { label: '退款分析', desc: '退款率与原因归类', dot: dot(6) },
-  dim: { label: '维度字典', desc: '品类与指标口径', dot: dot(3) }
-}
 
-const layerNodes = computed(() => {
-  const ids = [...new Set(visibleCards.value.map((c) => c.categoryId))].slice(0, 4)
-  return ids.map((id, i) => {
-    const meta = layerMeta[id] || { label: id, desc: '数据分类', dot: dot(7) }
-    const count = visibleCards.value.filter((c) => c.categoryId === id).length
-    return {
-      id: 'layer-' + id, kind: 'layer', categoryId: id,
-      label: meta.label, desc: meta.desc, dot: meta.dot,
-      count, level: count <= 2 ? 'simple' : 'moderate',
-      x: layerSlots[i % layerSlots.length].x,
-      y: layerSlots[i % layerSlots.length].y,
-      delay: -(i * 1.3)
-    }
-  })
-})
-const fileNodes = computed(() => visibleCards.value.slice(0, fileSlots.length).map((c, i) => ({
-  ...c,
-  kind: 'file',
-  x: fileSlots[i % fileSlots.length].x,
-  y: fileSlots[i % fileSlots.length].y,
-  delay: -(i * 0.9 + 0.4)
-})))
+const layerNodes = computed(() => tree.value.slice(0, layerSlots.length).map((n, i) => {
+  const slot = layerSlots[i % layerSlots.length]
+  return {
+    id: 'layer-' + n.id, kind: 'layer', categoryId: String(n.id),
+    label: n.name,
+    desc: `${n.fileCount} 个文件 · ${fmtRows(n.totalRows)} 行数据`,
+    dot: dot((i % 7) + 1),
+    count: n.fileCount,
+    level: n.fileCount <= 2 ? 'simple' : 'moderate',
+    x: slot.x, y: slot.y, delay: -(i * 1.3)
+  }
+}))
 
-/* 连线：每个文件节点接到同分类的层节点 */
+const fileNodes = computed(() => visibleEntries.value.slice(0, fileSlots.length).map((e, i) => {
+  const f = e.file
+  const sheets = f.sheets || []
+  const rows = sheets.reduce((s, x) => s + (x.rowCount || 0), 0)
+  const slot = fileSlots[i % fileSlots.length]
+  return {
+    ...e, kind: 'file', id: f.uploadId,
+    title: f.origName || '未命名文件',
+    tags: [`${sheets.length} 张表`, `${fmtRows(rows)} 行`, fmtTime(f.createdAt)].filter(Boolean),
+    tableCount: sheets.length,
+    time: fmtTime(f.createdAt),
+    real: f,
+    x: slot.x, y: slot.y, delay: -(i * 0.9 + 0.4)
+  }
+}))
+
+/* 连线：文件节点 → 所属大分类节点 */
 const edges = computed(() => {
   const out = []
   for (const f of fileNodes.value) {
@@ -242,8 +186,7 @@ const edges = computed(() => {
     const mx = (x1 + x2) / 2
     out.push({
       id: l.id + '-' + f.id,
-      d: `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`,
-      dot: l.dot
+      d: `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`
     })
   }
   return out
@@ -260,9 +203,8 @@ function zoomBy(delta) {
   zoom.value = Math.min(1.4, Math.max(0.6, Math.round((zoom.value + delta) * 10) / 10))
 }
 
-/* ---------- 打开文件 / 点击层节点筛选 ---------- */
+/* ---------- 打开文件 / 点击大分类筛选 ---------- */
 async function openFile(card) {
-  if (!card.real) { toast('这是演示数据，没有对应的 Excel 文件'); return }
   const relative = card.real.filePath || [...card.segments, card.real.origName].join('/')
   const root = (workspaceRoot.value || '').replace(/\/+$/, '')
   const absPath = [root, String(relative).replace(/^\/+/, '')].filter(Boolean).join('/')
@@ -283,7 +225,7 @@ function pickLayer(n) {
 <template>
   <div class="kb-scope kb-page kb-graph-page">
     <div class="kb-canvas">
-      <!-- 悬浮控制条：面包屑 / 筛选 / 计数 / 胶囊条 -->
+      <!-- 悬浮控制条 -->
       <div class="kb-graph-bar">
         <div class="kb-graph-bar-row">
           <div class="kb-graph-title">
@@ -299,32 +241,25 @@ function pickLayer(n) {
             </template>
           </nav>
           <FilterPanel v-model="selected" :groups="groups" />
-          <span class="kb-count">{{ categoryCount }} 个分类 · {{ visibleCards.length }} 个文件</span>
+          <span class="kb-count">{{ categoryCount }} 个分类 · {{ visibleEntries.length }} 个文件</span>
         </div>
-        <CategoryPills
-          :pills="pills" :active-id="activePill"
-          :legend="legend" :active-legend="activeLegend"
-          @select="activePill = $event"
-          @select-legend="activeLegend = activeLegend === $event ? '' : $event"
-        />
+        <CategoryPills :pills="pills" :active-id="activePill" @select="activePill = $event" />
       </div>
 
-      <!-- 悬浮画布世界：节点 + 连线一起缩放 -->
+      <!-- 悬浮画布世界 -->
       <div class="kb-world" :style="{ transform: 'scale(' + zoom + ')' }">
         <svg class="kb-edges" :viewBox="`0 0 ${VW} ${VH}`" preserveAspectRatio="none" aria-hidden="true">
           <path v-for="e in edges" :key="e.id" :d="e.d" class="kb-edge" />
         </svg>
 
         <div v-if="loading" class="kb-empty">正在读取数据…</div>
-        <template v-else-if="!visibleCards.length">
-          <div class="kb-empty">
-            <div class="big">∅</div>
-            <div>当前筛选条件下没有数据</div>
-            <div class="small"><button type="button" class="kb-card-open" @click="resetFilters">清除筛选</button></div>
-          </div>
-        </template>
+        <div v-else-if="!visibleEntries.length" class="kb-empty">
+          <div class="big">∅</div>
+          <div>还没有数据，先去上传文件吧</div>
+          <div class="small"><button type="button" class="kb-card-open" @click="resetFilters">清除筛选</button></div>
+        </div>
         <template v-else>
-          <!-- 分类层节点 -->
+          <!-- 大分类节点：名称来自后端 category.name -->
           <button v-for="n in layerNodes" :key="n.id" type="button"
                   class="kb-node kb-layer" :class="{ 'is-active': activePill === n.categoryId }"
                   :style="nodeStyle(n)" @click="pickLayer(n)">
@@ -363,7 +298,6 @@ function pickLayer(n) {
         </template>
       </div>
 
-      <!-- 左下缩放控件 -->
       <div class="kb-zoom" aria-label="画布缩放">
         <button type="button" aria-label="缩小" @click="zoomBy(-0.1)">−</button>
         <span>{{ Math.round(zoom * 100) }}%</span>
@@ -371,7 +305,6 @@ function pickLayer(n) {
         <button type="button" class="fit" @click="zoom = 1">适配</button>
       </div>
 
-      <!-- 右下迷你图 -->
       <div class="kb-minimap" aria-hidden="true">
         <span v-for="n in layerNodes" :key="'ml' + n.id" class="kb-mm-layer"
               :style="{ left: (n.x / VW * 100) + '%', top: (n.y / VH * 100) + '%', background: n.dot }"></span>
