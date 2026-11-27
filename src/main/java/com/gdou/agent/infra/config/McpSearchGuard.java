@@ -15,15 +15,16 @@ import java.util.Map;
 /**
  * 联网搜索（MCP stdio）的启动守卫。
  *
- * <p>背景：Spring AI 的 {@code McpToolCallbackAutoConfiguration} 在刷新上下文时就要
- * 拿到工具列表（{@code mcpToolCallbacks} → {@code mcpSyncClients} → initialize），
- * 只要 stdio 子进程起不来或者握手超时，整个 ApplicationContext 创建就会失败。
- * {@code ReActAgentRunner} 上的 {@code @Autowired(required = false)} 挡不住这一点 ——
- * 那只作用于注入，不作用于 bean 创建。实测一次 20 秒握手超时就能把应用拖死。
+ * <p>职责：在「配置已加载、上下文还没刷新」的窗口里确定入口脚本的真实位置。
+ * <ol>
+ *   <li>Electron 传了 {@code -Dinsightlens.mcp.websearch-script} 且文件存在 → 直接用；</li>
+ *   <li>没传但项目里跑过 {@code npm run runtime} → 自动认领 frontend/runtime 下的入口；</li>
+ *   <li>都没有 → 把 {@code insightlens.mcp.enabled} 压成 false，不建客户端。</li>
+ * </ol>
  *
- * <p>所以这里在「配置已加载、上下文还没刷新」的窗口里先检查入口脚本是否存在：
- * 不存在就把 {@code spring.ai.mcp.client.enabled} 压成 false，
- * 让应用以「无联网搜索」的形态正常启动，而不是整个起不来。
+ * <p>三点必须压掉开关而不是让它在运行期失败：{@link McpSearchConfig} 的客户端是在
+ * bean 创建期握手的，脚本路径不存在就必然建不起来。压开关比让 bean 抛异常更干净，
+ * 后者虽然也会被 McpSearchConfig 捕获降级，但日志里会多一条无意义的失败记录。
  */
 public class McpSearchGuard implements EnvironmentPostProcessor, Ordered {
 
@@ -54,8 +55,9 @@ public class McpSearchGuard implements EnvironmentPostProcessor, Ordered {
         }
 
         Map<String, Object> override = new HashMap<>();
-        override.put("spring.ai.mcp.client.enabled", "false");
-        // addFirst：优先级高于 application.yaml 里的 ${insightlens.mcp.enabled}
+        // 压自己的开关，而不是 spring.ai.mcp.client.enabled：装配权已经交给 McpSearchConfig，
+        // 那边用 @ConditionalOnProperty(insightlens.mcp.enabled=true) 决定要不要建客户端。
+        override.put(ENABLED_KEY, "false");
         environment.getPropertySources().addFirst(new MapPropertySource("mcpSearchGuard", override));
 
         // 此时日志系统尚未初始化，直接写 stderr（Electron 会把它收进 backend.log）

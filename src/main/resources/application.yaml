@@ -40,21 +40,34 @@ spring:
           # 与 Codex config.toml 的 model 保持一致：gpt-6-luna（不是 gpt-6.1-luna）
           model: gpt-6-luna
           temperature: 0
+          # 关闭并行工具调用。第三方 OpenAI 兼容中转在流式返回 tool_call 时，
+          # 若某个分片既没有 id 也没有 function，Spring AI 的
+          # OpenAiStreamFunctionCallingHelper.merge 会在 current.name() 上抛 NPE
+          # （该方法只判了 previous == null，没判 current，1.1.8 仍未修），
+          # 整个流被 MessageAggregator 中断，前端只看到「本轮处理失败」。
+          # 一次只让模型用一个工具，能显著降低碰上不规范分片的概率。
+          parallel-tool-calls: false
     mcp:
       client:
-        # 默认关闭：联网搜索是增强能力，主链路（Excel 查数）不依赖它。
-        # 打开后启动多约 6-8s（node 拉起 + 握手），关着不影响任何功能。
+        # 恒为 false：不启用 Spring AI 的自动装配，改由 McpSearchConfig 手动创建客户端。
+        # 原因：auto-config 在上下文刷新时同步 initialize，握手超时用的是 MCP SDK 硬编码的
+        # initializationTimeout=20s，而 Spring AI 1.1.2 只暴露了 requestTimeout，改不动它。
+        # open-websearch 冷加载 6000+ 文件实测 16-25s，必然 TimeoutException 把整个
+        # ApplicationContext 拖挂 —— 表现就是「insightlens.mcp.enabled 改成 true 后启动超时」。
+        # McpSearchConfig 把握手超时放宽到 60s，且初始化失败只降级、不抛异常。
         #
-        # 开发态（mvn spring-boot:run）想用联网，加环境变量即可：
-        #   INSIGHTLENS_MCP_ENABLED=true mvn spring-boot:run
-        # 入口脚本不用指定 —— McpSearchGuard 会自动探测 frontend/runtime 下
-        # prepare-runtime.mjs 预置好的 open-websearch。
-        enabled: ${insightlens.mcp.enabled:false}
+        # 联网开关本身仍是 insightlens.mcp.enabled：Electron 通过 -D 传，
+        # 开发态可以 INSIGHTLENS_MCP_ENABLED=true mvn spring-boot:run，
+        # 入口脚本路径由 McpSearchGuard 自动探测 frontend/runtime 下的预置包。
+        enabled: false
         # 注意：request-timeout 只管「连接建立之后的调用」。initialize 握手用的是
         # MCP Java SDK 自己的 initializationTimeout，默认 20 秒且 Spring AI 1.1.2
         # 没把它暴露成配置项 —— 这里写 60s 也改不了那个 20s 硬上限。
         # 应对办法在 Electron 侧：起后端之前先预热一次 open-websearch
         # （main.cjs 的 warmUpWebSearch），热态下实测握手 0.15–4 秒。
+        # 下面 request-timeout 与 stdio.connections 已不生效（自动装配被上面关掉了），
+        # 仅作文档保留：真实装配参数在 McpSearchConfig —— 60s 握手超时、60s 调用超时、
+        # 以及 MODE / DEFAULT_SEARCH_ENGINE / ALLOWED_SEARCH_ENGINES 三个环境变量。
         request-timeout: 60s
         # ==== 方案 A：本地 stdio（中文引擎，无需 key） ====
         # open-websearch（Aas-ee/open-webSearch，Apache-2.0）不是搜索 API：
