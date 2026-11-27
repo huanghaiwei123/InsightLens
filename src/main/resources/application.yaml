@@ -33,6 +33,13 @@ spring:
 
 
   ai:
+    model:
+      chat: openai
+      # 只保留 OpenAI 的自动装配，DeepSeek 由 ApiKeyService 手动构建。
+      # 原因：DeepSeekChatAutoConfiguration 里有 Assert.hasText(apiKey, "DeepSeek API key must be set")，
+      # key 为空会让整个 ApplicationContext 起不来；而本产品要求「用户先启动、再在设置页填 key」，
+      # 所以不能让它参与自动装配。同时这一行也避免了两个 ChatModel bean 并存导致按接口注入歧义。
+      # 想改成自动装配前先想清楚这两点，别只为了少写几行配置。
     openai:
       # api-key / base-url 属于环境相关配置，放在 application-local.yaml，不进版本库
       chat:
@@ -47,6 +54,26 @@ spring:
           # 整个流被 MessageAggregator 中断，前端只看到「本轮处理失败」。
           # 一次只让模型用一个工具，能显著降低碰上不规范分片的概率。
           parallel-tool-calls: false
+    deepseek:
+      # 这一段不参与自动装配（见上面 spring.ai.model.chat），只是 ApiKeyService 构建
+      # DeepSeekChatModel 时的默认值来源：域名 / 模型名都从这里读。
+      #
+      # api-key 留空：设置页填完后写入 application-local.yaml 覆盖，重启仍然生效。
+      # 不要写成 ${DEEPSEEK_API_KEY} —— 环境变量缺失时占位符会原样保留成字面量，
+      # 看起来「已配置」其实每个请求都 401，比直接显示「未配置」更难排查。
+      api-key: ""
+      # DeepSeek 的 completions 路径是 /chat/completions（不带 /v1），
+      # 所以 base-url 只能是裸域名，带上 /v1 会拼出错路径。
+      base-url: https://api.deepseek.com
+      chat:
+        options:
+          # deepseek-chat 支持工具调用与流式，是查数场景的正确档位；
+          # deepseek-reasoner 不支持工具调用，换上去 ReactAgent 会直接失效，不要改。
+          model: deepseek-chat
+          temperature: 0
+
+
+
     mcp:
       client:
         # 默认关闭：联网搜索是增强能力，主链路（Excel 查数）不依赖它。
@@ -139,3 +166,10 @@ logging:
 agent:
   # 上传文件根目录：Electron 打包后 = insightlens.home/data/excel
   workspace: ${insightlens.home:.}/data/excel
+
+insightlens:
+  llm:
+    # 当前主模型：openai / deepseek。设置页切换后写入 application-local.yaml 覆盖这里，
+    # 所以重启后仍是上次选的那家。这里只存「选哪个」，
+    # 各家的 key / base-url / model 仍统一放在 spring.ai.openai.* 与 spring.ai.deepseek.*。
+    provider: openai

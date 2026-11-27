@@ -52,6 +52,32 @@ export function saveApiKey(apiKey) {
   }).then(unwrap)
 }
 
+/**
+ * 读取全部厂商配置：{ active, providers:[{id,label,model,baseUrl,masked,configured,active}] }。
+ * 掩码与是否已配置都在这里给出，前端不需要知道 key 的明文。
+ */
+export function fetchLlmSettings() {
+  return fetch(PREFIX + '/settings/llm').then(unwrap)
+}
+
+/** 切换主模型（全局生效，落盘后重启仍保留）。provider 取 'openai' | 'deepseek'。 */
+export function switchLlmProvider(provider) {
+  return fetch(PREFIX + '/settings/llm/provider', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider })
+  }).then(unwrap)
+}
+
+/** 保存指定厂商的 API Key，返回更新后的整体配置。 */
+export function saveLlmKey(provider, apiKey) {
+  return fetch(PREFIX + '/settings/llm/key', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, apiKey })
+  }).then(unwrap)
+}
+
 /** 按会话读历史消息：返回 [{role:'user'|'assistant', text}]，按时间升序 */
 export function fetchHistory(sessionId) {
   return fetch(PREFIX + '/history?sessionId=' + encodeURIComponent(sessionId)).then(unwrap)

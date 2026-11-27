@@ -64,6 +64,40 @@ class ApiKeyServiceTest {
     }
 
     @Test
+    @DisplayName("写入 DeepSeek 密钥：缺 deepseek 节点时补在 spring.ai 下，不动 openai")
+    void insertsDeepSeekBlock() {
+        String result = ApiKeyService.setProperty(YAML, "spring.ai.deepseek.api-key", "sk-deepseek-key");
+
+        // 缩进必须与 openai 同级（4 空格），否则会被解析成 openai 的子节点
+        assertThat(result).contains("    deepseek:\n      api-key: 'sk-deepseek-key'");
+        assertThat(result).contains("openai:\n      # 取自 Codex 的 auth.json\n      api-key: 'old-secret-key'");
+        assertThat(result).containsOnlyOnce("spring:");
+        assertThat(result).contains("tavily:\n  api-key: 'tavily-secret'");
+    }
+
+    @Test
+    @DisplayName("切换主模型：顶层缺 insightlens 节点时整条链补出来，与 spring 平级")
+    void insertsProviderAtTopLevel() {
+        String result = ApiKeyService.setProperty(YAML, "insightlens.llm.provider", "deepseek");
+
+        assertThat(result).contains("insightlens:\n  llm:\n    provider: 'deepseek'");
+        // 新节点必须顶格，否则会挂到上一个顶层节点下面
+        assertThat(result).doesNotContain("  insightlens:");
+        assertThat(result).contains("spring:\n  ai:");
+    }
+
+    @Test
+    @DisplayName("重复写入同一路径是幂等的，不会产生第二份 deepseek 节点")
+    void rewriteIsIdempotent() {
+        String once = ApiKeyService.setProperty(YAML, "spring.ai.deepseek.api-key", "k1");
+        String twice = ApiKeyService.setProperty(once, "spring.ai.deepseek.api-key", "k2");
+
+        assertThat(twice).containsOnlyOnce("deepseek:");
+        assertThat(twice).contains("api-key: 'k2'");
+        assertThat(twice).doesNotContain("k1");
+    }
+
+    @Test
     @DisplayName("掩码只保留头尾各 4 位，短 Key 不回显全貌")
     void masksKey() {
         assertThat(ApiKeyService.mask("sk-abcdefghijklmnop")).isEqualTo("sk-a****mnop");

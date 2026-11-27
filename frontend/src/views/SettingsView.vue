@@ -1,18 +1,25 @@
 <script setup>
-import { ref, inject, watch, onMounted } from 'vue'
-import { fetchConfig, fetchApiKeySettings, saveApiKey } from '@/api'
+import { computed, ref, inject, watch, onMounted } from 'vue'
+import { fetchConfig, fetchLlmSettings, switchLlmProvider, saveLlmKey } from '@/api'
 
 const toast = inject('toast')
 const root = ref('')
 const showTrace = ref(localStorage.getItem('showTrace') !== '0')
 const lessMotion = ref(localStorage.getItem('lessMotion') === '1')
 
-// API Key 明文只在用户输入框里存在；页面读到的是后端返回的掩码串。
-const apiKey = ref('')
-const apiKeyInfo = ref(null)
-const apiKeyLoading = ref(false)
-const savingKey = ref(false)
-const revealKey = ref(false)
+// 模型配置：一次拿全两家，切主模型 / 改 Key 都返回同一份结构，前端直接覆盖。
+const llm = ref(null)
+const llmLoading = ref(false)
+const switching = ref('')
+const saving = ref('')
+const draftKeys = ref({})
+const reveal = ref({})
+
+const providers = computed(() => (llm.value && llm.value.providers) || [])
+const activeLabel = computed(() => {
+  const hit = providers.value.find((p) => p.active)
+  return hit ? hit.label : '—'
+})
 
 function applyMotion() {
   document.body.classList.toggle('less-motion', lessMotion.value)
@@ -28,27 +35,41 @@ watch(lessMotion, (v) => {
   toast(v ? '已缩短动画' : '已恢复动画')
 })
 
-function loadApiKey() {
-  apiKeyLoading.value = true
-  return fetchApiKeySettings()
-    .then((d) => { apiKeyInfo.value = d })
+function loadLlm() {
+  llmLoading.value = true
+  return fetchLlmSettings()
+    .then((d) => { llm.value = d })
     .catch((e) => toast('读取模型配置失败：' + e.message))
-    .finally(() => { apiKeyLoading.value = false })
+    .finally(() => { llmLoading.value = false })
 }
 
-async function applyApiKey() {
-  const value = apiKey.value.trim()
+// 保存某一家（OpenAI / DeepSeek）的 Key：后端落盘并重建该家实例，若是主模型则下一轮立即生效。
+async function applyKey(p) {
+  const value = (draftKeys.value[p.id] || '').trim()
   if (!value) { toast('请先填入新的 API Key'); return }
-  savingKey.value = true
+  saving.value = p.id
   try {
-    apiKeyInfo.value = await saveApiKey(value)
-    apiKey.value = ''
-    revealKey.value = false
-    toast('API Key 已更新，立即生效')
+    llm.value = await saveLlmKey(p.id, value)
+    draftKeys.value[p.id] = ''
+    reveal.value[p.id] = false
+    toast(p.label + ' 的 API Key 已更新，立即生效')
   } catch (e) {
     toast('保存失败：' + e.message)
   } finally {
-    savingKey.value = false
+    saving.value = ''
+  }
+}
+
+// 切换主模型：全局生效，所有会话下一轮都走它；选择会落盘，重启后仍是这家。
+async function applyProvider(p) {
+  switching.value = p.id
+  try {
+    llm.value = await switchLlmProvider(p.id)
+    toast('已切换到 ' + p.label + '，下一轮提问立即生效')
+  } catch (e) {
+    toast('切换失败：' + e.message)
+  } finally {
+    switching.value = ''
   }
 }
 
@@ -56,7 +77,7 @@ onMounted(() => {
   applyMotion()
   document.body.classList.toggle('hide-trace', !showTrace.value)
   fetchConfig().then((d) => { root.value = d.workspaceRoot || '' }).catch(() => {})
-  loadApiKey()
+  loadLlm()
 })
 </script>
 
@@ -65,7 +86,7 @@ onMounted(() => {
     <div class="page-head">
       <div class="kicker">Settings</div>
       <h1>设置</h1>
-      <p>这些设置保存在本机，只影响你当前的显示方式和模型密钥，不会改动数据。</p>
+      <p>这些设置保存在本机，只影响你当前的显示方式和模型配置，不会改动数据。</p>
     </div>
     <div class="grid">
       <div class="card sp-8">
@@ -90,41 +111,60 @@ onMounted(() => {
       <div class="card sp-12">
         <div class="key-head">
           <div>
-            <h2>模型 API Key</h2>
-            <p class="desc">用于调用大模型。修改后立即生效，无需重启应用。</p>
+            <h2>主模型</h2>
+            <p class="desc">选择用哪家大模型回答问题。切换后全局生效，无需重启，选择会保存在本机。</p>
           </div>
-          <span class="tag" :class="apiKeyInfo && apiKeyInfo.configured ? 'sage' : 'gold'">
-            {{ apiKeyLoading ? '读取中' : (apiKeyInfo && apiKeyInfo.configured ? '已配置' : '未配置') }}
-          </span>
+          <span class="tag sage">当前：{{ llmLoading ? '读取中' : activeLabel }}</span>
         </div>
 
-        <div class="key-current">
-          <span class="key-label">当前密钥</span>
-          <span class="mono">{{ apiKeyInfo ? apiKeyInfo.masked : '—' }}</span>
-          <span v-if="apiKeyInfo && apiKeyInfo.baseUrl" class="key-url mono small">
-            接口地址：{{ apiKeyInfo.baseUrl }}
-          </span>
+        <div class="providers">
+          <div v-for="p in providers" :key="p.id" class="provider" :class="{ active: p.active }">
+            <div class="provider-head">
+              <div>
+                <b>{{ p.label }}</b>
+                <div class="desc mono">{{ p.model }}</div>
+              </div>
+              <span class="tag" :class="p.active ? 'sage' : (p.configured ? 'muted' : 'gold')">
+                {{ p.active ? '当前使用' : (p.configured ? '已配置' : '未配置') }}
+              </span>
+            </div>
+
+            <div class="provider-meta mono small">
+              <span>{{ p.baseUrl || '接口地址未设置' }}</span>
+              <span>密钥：{{ p.masked }}</span>
+            </div>
+
+            <div class="key-row">
+              <input
+                v-model="draftKeys[p.id]"
+                :type="reveal[p.id] ? 'text' : 'password'"
+                class="key-input mono"
+                :placeholder="p.configured ? '粘贴新的 API Key（留空不改）' : '粘贴 API Key'"
+                autocomplete="off"
+                spellcheck="false"
+                @keyup.enter="applyKey(p)"
+              />
+              <button class="btn ghost" type="button" @click="reveal[p.id] = !reveal[p.id]">
+                {{ reveal[p.id] ? '隐藏' : '显示' }}
+              </button>
+              <button class="btn ghost" type="button" :disabled="saving === p.id" @click="applyKey(p)">
+                {{ saving === p.id ? '保存中…' : '保存' }}
+              </button>
+            </div>
+
+            <button
+              class="btn primary provider-switch"
+              type="button"
+              :disabled="p.active || !p.configured || switching === p.id"
+              @click="applyProvider(p)"
+            >
+              {{ p.active ? '当前主模型' : (p.configured ? '设为主模型' : '请先配置 Key') }}
+            </button>
+          </div>
         </div>
 
-        <div class="key-form">
-          <input
-            v-model="apiKey"
-            :type="revealKey ? 'text' : 'password'"
-            class="key-input mono"
-            placeholder="粘贴新的 API Key"
-            autocomplete="off"
-            spellcheck="false"
-            @keyup.enter="applyApiKey"
-          />
-          <button class="btn ghost" type="button" @click="revealKey = !revealKey">
-            {{ revealKey ? '隐藏' : '显示' }}
-          </button>
-          <button class="btn primary" type="button" :disabled="savingKey" @click="applyApiKey">
-            {{ savingKey ? '保存中…' : '保存并生效' }}
-          </button>
-        </div>
         <p class="desc key-note">
-          明文只写入本机的 application-local.yaml，页面不会再次显示完整密钥；留空不修改。
+          密钥只写入本机的 application-local.yaml，页面只显示头尾各 4 位；两家可以都填，随时切换。
         </p>
       </div>
     </div>
@@ -133,24 +173,30 @@ onMounted(() => {
 
 <style scoped>
 .key-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.key-current {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
-  margin: 18px 0 14px; padding: 12px 14px; border-radius: var(--r-md);
-  background: rgba(44,39,35,.05); font-size: 13px;
+.providers {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px; margin-top: 18px;
 }
-.key-label { color: var(--ink-2); }
-.key-url { margin-left: auto; color: var(--ink-3); }
-.key-form { display: flex; gap: 10px; align-items: center; }
+.provider {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 16px; border: 1px solid var(--line); border-radius: var(--r-md);
+  background: rgba(255,255,255,.55);
+}
+.provider.active { border-color: rgba(111,154,126,.55); background: var(--sage-soft); }
+.provider-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.provider-meta { display: flex; flex-direction: column; gap: 2px; color: var(--ink-3); word-break: break-all; }
+.provider-switch { width: 100%; }
+.key-row { display: flex; gap: 8px; align-items: center; }
 .key-input {
-  flex: 1; min-width: 0; padding: 11px 14px; border-radius: var(--r-md);
+  flex: 1; min-width: 0; padding: 10px 12px; border-radius: var(--r-md);
   border: 1px solid var(--line); background: rgba(255,255,255,.85);
   outline: none; font-size: 13px;
 }
 .key-input:focus { border-color: rgba(217,122,69,.5); }
-.key-note { margin-top: 12px; }
+.key-note { margin-top: 14px; }
 @media (max-width: 720px) {
-  .key-form { flex-wrap: wrap; }
+  .providers { grid-template-columns: 1fr; }
+  .key-row { flex-wrap: wrap; }
   .key-input { flex-basis: 100%; }
-  .key-url { margin-left: 0; }
 }
 </style>

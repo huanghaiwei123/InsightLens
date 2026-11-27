@@ -161,6 +161,45 @@ public class PersonalController {
                 apiKeyService.update(body == null ? null : body.apiKey()));
     }
 
+    /** 切换主模型的请求体：provider 取 openai / deepseek。 */
+    public record ProviderRequest(String provider) {
+    }
+
+    /** 改某一厂商 Key 的请求体：provider 决定写哪一段配置。 */
+    public record ProviderKeyRequest(String provider, String apiKey) {
+    }
+
+    /**
+     * 读取全部厂商的模型配置：当前主模型、各家的模型名/接口地址/掩码 Key。
+     * 一次返回两家，设置页不用按厂商发多次请求。
+     */
+    @GetMapping("/settings/llm")
+    public Result llmSettings() {
+        return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS,
+                apiKeyService.settings());
+    }
+
+    /**
+     * 切换主模型：全局生效（所有会话下一轮都走它），选择会落盘，重启后保留。
+     * 没配 Key 的厂商会被拒绝 —— 允许切过去只会让用户下一轮提问才看到失败。
+     */
+    @PutMapping("/settings/llm/provider")
+    public Result switchProvider(@RequestBody ProviderRequest body) {
+        return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS,
+                apiKeyService.switchProvider(body == null ? null : body.provider()));
+    }
+
+    /**
+     * 修改指定厂商的 API Key：落盘并重建该厂商实例，若它正是主模型则下一轮立即生效。
+     * 全局第一把可用的 Key 会自动成为主模型，避免「填完了还是不能用」。
+     */
+    @PutMapping("/settings/llm/key")
+    public Result updateProviderKey(@RequestBody ProviderKeyRequest body) {
+        return Result.success(CodeConstant.CALL_SUCCESS, MsgConstant.CALL_SUCCESS,
+                apiKeyService.updateKey(body == null ? null : body.provider(),
+                        body == null ? null : body.apiKey()));
+    }
+
     /**
      * 下载报表里点击的 Excel：只接受 file_view 登记过的 uploadId，
      * 路径越界或文件被移动时由 FileDownloadService 抛业务异常，统一走全局异常兜底。
