@@ -53,3 +53,9 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+
+### 联网搜索离线运行时（open-websearch 及其依赖，由 npm run runtime 生成）
+frontend/runtime/
+
+### 桌面安装包产物（npm run dist）
+frontend/release/
