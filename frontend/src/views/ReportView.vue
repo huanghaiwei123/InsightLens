@@ -96,7 +96,7 @@ const filterDefs = [
   }
 ]
 
-/* 筛选计数基于「当前分类及其所有子分类」的文件，切层后自然更新 */
+/* 筛选计数基于「当前分类及其所有子分类」的文件，切层后自然更新；根层统计全部分类 */
 function collectFiles(nodes) {
   const out = []
   for (const n of nodes || []) {
@@ -105,7 +105,10 @@ function collectFiles(nodes) {
   }
   return out
 }
-const filesInScope = computed(() => collectFiles(currentCategories.value))
+const filesInScope = computed(() => {
+  const node = currentNode.value
+  return collectFiles(node ? [node] : tree.value)
+})
 const groups = computed(() => filterDefs.map((g) => ({
   title: g.title,
   options: g.options.map((o) => ({
@@ -114,16 +117,16 @@ const groups = computed(() => filterDefs.map((g) => ({
   }))
 })))
 
-/* 是否处于最末级分类：只有叶子分类才展示文件，中间层只展示子分类 */
-const isLeaf = computed(() => {
-  const node = currentNode.value
-  return !!node && !(node.children || []).length
-})
-
-/* 当前分类直属文件（应用筛选）；非叶子分类不下钻到文件 */
+/*
+ * 当前分类的直属文件（应用筛选）。
+ * 不按「是否叶子」拦一道：一个分类完全可以既有子分类、又直接挂着文件，
+ * 早期版本在中间层直接返回空数组，这类节点的文件一点进去就消失。
+ * 根层没有直属文件，只展示分类。
+ */
 const currentFiles = computed(() => {
-  if (!isLeaf.value) return []
-  const files = currentNode.value.files || []
+  const node = currentNode.value
+  if (!node) return []
+  const files = node.files || []
   return files.filter((f) => {
     const facets = facetsOf(f)
     for (const g of filterDefs) {
@@ -147,7 +150,10 @@ onMounted(() => {
 /* ---------- 层级导航 ---------- */
 function resetView() { pan.value = { x: 0, y: 0 }; zoom.value = 1 }
 function enterCategory(n) {
-  path.value = [...path.value, { id: n.id, name: n.name, node: n }]
+  // 入参是画布视图节点（只有 raw / label），钻取路径必须存后端的原始树节点，
+  // 否则下一层拿不到 children 与 files，进来就是空画布。
+  const raw = n.raw || n
+  path.value = [...path.value, { id: n.id, name: raw.name || n.label, node: raw }]
   selected.value = new Set()
   resetView()
 }
@@ -219,17 +225,23 @@ function scatter(items, salt) {
   })
 }
 
+/* 分类卡片的副标题：子分类与直属文件可能同时存在，数量分开说清，避免「进入后空」的预期错位 */
+function describeNode(n) {
+  const childCount = (n.children || []).length
+  const directFiles = (n.files || []).length
+  if (childCount && directFiles) return `${childCount} 个子分类 · ${directFiles} 个文件`
+  if (childCount) return `${childCount} 个子分类`
+  if (directFiles) return `${directFiles} 个文件`
+  return '暂无内容'
+}
+
 const allNodes = computed(() => {
   const cats = currentCategories.value.map((n, i) => ({
     id: 'cat-' + (n.id ?? n.name),
     kind: 'category',
     raw: n,
     label: n.name,
-    desc: (n.children || []).length
-        ? `${n.children.length} 个子分类`
-        : '点击进入查看文件',
-    count: n.fileCount || 0,
-    childCount: (n.children || []).length,
+    desc: describeNode(n),
     level: (n.children || []).length ? 'moderate' : 'simple',
     dot: dot((i % 7) + 1),
     delay: -(i * 1.1)
@@ -253,6 +265,14 @@ const allNodes = computed(() => {
 })
 const categoryNodes = computed(() => allNodes.value.filter((n) => n.kind === 'category'))
 const fileNodes = computed(() => allNodes.value.filter((n) => n.kind === 'file'))
+
+/* 顶栏计数：同一层可能既有子分类又有文件，两者都要显示 */
+const scopeLabel = computed(() => {
+  const c = categoryNodes.value.length
+  const f = fileNodes.value.length
+  if (c && f) return `${c} 个分类 · ${f} 个文件`
+  return c ? `${c} 个分类` : `${f} 个文件`
+})
 
 /* 钻取后：从画布顶部「当前位置」锚点连线到每个子节点 */
 const edges = computed(() => {
@@ -326,7 +346,7 @@ function chatWithCategory(n) {
             </template>
           </nav>
           <FilterPanel v-model="selected" :groups="groups" />
-          <span class="kb-count">{{ isLeaf ? fileNodes.length + ' 个文件' : categoryNodes.length + ' 个分类' }}</span>
+          <span class="kb-count">{{ scopeLabel }}</span>
         </div>
         <div class="kb-bar-bottom">
           <span class="kb-drag-hint">按住空白处拖动 · 滚轮缩放 · 点分类进入</span>
@@ -362,7 +382,7 @@ function chatWithCategory(n) {
             <span class="kb-layer-name">{{ n.label }}</span>
             <span class="kb-layer-desc">{{ n.desc }}</span>
             <span class="kb-layer-foot">
-              <span class="kb-enter-hint">{{ n.childCount ? '查看子分类' : '查看文件' }} · 进入 →</span>
+              <span class="kb-enter-hint">查看内容 · 进入 →</span>
               <button type="button" class="kb-chat-entry" @click.stop="chatWithCategory(n)">
                 进入对话 <span class="kb-layer-arrow">→</span>
               </button>
