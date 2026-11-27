@@ -124,6 +124,21 @@ function runtimeDir() {
 }
 
 /**
+ * 找 java 可执行体：优先用安装包内置的裁剪 JRE，其次才退回 PATH 里的 java。
+ *
+ * 为什么内置：此前要求用户自备 JDK 17 并加进 PATH，等于把「能不能用」押在用户环境上。
+ * 内置的是 jlink 裁出来的 JRE（约 45MB，完整 JRE 180MB），模块集由
+ * scripts/prepare-jre.mjs 生成，已实测覆盖 Spring Boot + DuckDB 原生库 + HTTPS TLS。
+ *
+ * 开发态不强制：frontend/runtime/jre 存在就用，不存在就用系统 java —— 改后端代码时
+ * 不该被迫先跑一遍 jlink。打包前 predist 会确保它存在。
+ */
+function javaExe() {
+  const bundled = path.join(runtimeDir(), 'jre', 'bin', process.platform === 'win32' ? 'java.exe' : 'java')
+  return fs.existsSync(bundled) ? bundled : 'java'
+}
+
+/**
  * 找到能跑 open-websearch 的 Node 可执行体。
  *
  * 首选 Electron 自己：加上 ELECTRON_RUN_AS_NODE=1，electron.exe 就是一个纯 Node
@@ -366,9 +381,11 @@ function startBackend(port) {
   }
 
   const rt = nodeRuntime()
+  const java = javaExe()
+  appLog(`[backend] java=${java}`)
   logStream = fs.createWriteStream(path.join(home(), LOG_FILE), { flags: 'a' })
   backendExit = null
-  backend = spawn('java', [...jvmArgs(port), ...launch], {
+  backend = spawn(java, [...jvmArgs(port), ...launch], {
     cwd: APP_ROOT,
     windowsHide: true,
     // ELECTRON_RUN_AS_NODE 必须由 java 继承下去：Spring AI 用 ProcessBuilder 起搜索子进程，
@@ -389,7 +406,14 @@ function startBackend(port) {
   })
   backend.on('error', (err) => {
     backendExit = err.message
-    dialog.showErrorBox('后端启动失败', `${err.message}\n请确认已安装 JDK 17 并在 PATH 中`)
+    let hint = ''
+    if (err.code === 'ENOENT') {
+      // 打包态 javaExe() 一定返回绝对路径；走了 PATH 说明内置运行时没生成
+      hint = path.isAbsolute(java)
+        ? '内置 Java 运行时缺失或被拦截，请重新安装（杀毒软件可能隔离了 runtime\\jre）'
+        : '本机没有找到 java。安装 JDK 17 并加入 PATH，或在 frontend 目录执行 npm run jre 生成内置运行时'
+    }
+    dialog.showErrorBox('后端启动失败', `${err.message}${hint ? '\n' + hint : ''}`)
   })
   return true
 }

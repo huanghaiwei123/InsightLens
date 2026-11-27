@@ -1,7 +1,7 @@
 {
   "name": "insightlens-frontend",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "InsightLens 桌面客户端：Excel 上传建库 + 自然语言问数",
   "author": "huanghaiwei",
   "type": "module",
@@ -11,9 +11,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "runtime": "node scripts/prepare-runtime.mjs",
+    "jre": "node scripts/prepare-jre.mjs",
     "preelectron": "node scripts/prepare-runtime.mjs",
     "electron": "electron .",
-    "predist": "node scripts/prepare-runtime.mjs && vite build",
+    "predist": "node scripts/prepare-jre.mjs && node scripts/prepare-runtime.mjs && vite build",
     "dist": "node scripts/dist.mjs"
   },
   "dependencies": {
@@ -64,6 +65,10 @@
       {
         "from": "../target/lib",
         "to": "backend/lib"
+      },
+      {
+        "from": "../target/InsightLens-0.0.1-SNAPSHOT.jar",
+        "to": "backend/InsightLens.jar"
       },
       {
         "from": "../application-local.example.yaml",
