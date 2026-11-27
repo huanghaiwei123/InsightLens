@@ -27,10 +27,13 @@ public class AnalysisState implements Serializable {
     /** needClarify=true 时抛给用户的那句话；否则为 null */
     private String questionToUser;
 
-    /** 可用表清单：schema_retrieve 按当前分类从 file_view 全量收集，兼作 SQL 表名白名单 */
+    /**
+     * 系统表清单：schema_retrieve 固定下发 7 张系统表，拼进 SQL 生成提示词，
+     * 并在 SqlGuardNode 构成表名白名单。用户 Excel 不进这里，模型只能用 read_xlsx 读路径。
+     */
     private List<String> candidateTables;
 
-    /** 命中表的 DDL + 字段注释，拼进提示词 */
+    /** 系统表 DDL + 表注释，拼进提示词 */
     private String tableSchemas;
 
     /**

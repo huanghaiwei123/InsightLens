@@ -26,7 +26,7 @@ import java.util.Set;
  * ② Schema 检索节点
  * 入：当前窗口的 categoryId（SessionHolder）
  * 出：fileCatalog（本分类可读 Excel 的路径 + sheet + 列结构）、allowedFilePaths（路径白名单）、
- *     tableSchemas（仅系统表 DDL + 口径注释，供模型查元数据用）
+ *     tableSchemas（仅系统表 DDL + 表注释，供模型查元数据用）
  *
  * 用户 Excel 不注册成 DuckDB 视图，模型直接用 read_xlsx('绝对路径', sheet='...') 读取，
  * 所以这里要喂给模型「路径 + 真实列名」——只给文件名模型写不出带列的 SQL。
@@ -123,7 +123,8 @@ public class SchemaRetrieveNode implements Node {
                         + " where schema_name = 'main' and lower(table_name) in (" + placeholders + ")",
                 (rs, rowNum) -> rs.getString("sql"), SYSTEM_TABLES.toArray());
 
-        // 口径词典写在 COMMENT ON 里，CREATE 语句不带；补注入给模型（只取系统表）
+        // 表注释写在 COMMENT ON 里，CREATE 语句不带；补注入给模型理解系统表用途（只取系统表）。
+        // 注释不是业务口径来源——用户数据的口径由澄清阶段的 assumptions 给出。
         List<String> tableComments = jdbc.query(
                 "select '-- 表注释 ' || table_name || '：' || comment from duckdb_tables()"
                         + " where schema_name = 'main' and comment is not null and comment <> ''"
@@ -139,7 +140,7 @@ public class SchemaRetrieveNode implements Node {
         StringBuilder sb = new StringBuilder();
         ddlList.stream().filter(Objects::nonNull).forEach(ddl -> sb.append(ddl).append('\n'));
         if (!tableComments.isEmpty() || !columnComments.isEmpty()) {
-            sb.append("\n-- 库内登记的业务口径（COMMENT ON TABLE / COLUMN），与表结构同等权威：\n");
+            sb.append("\n-- 系统表说明（COMMENT ON TABLE / COLUMN），只描述系统表用途，不是业务口径：\n");
             tableComments.forEach(line -> sb.append(line).append('\n'));
             columnComments.forEach(line -> sb.append(line).append('\n'));
         }

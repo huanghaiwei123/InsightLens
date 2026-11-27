@@ -81,7 +81,7 @@ public class SqlGenerateNode implements Node {
         sb.append("口径假设：").append(
                 state.getAssumptions() == null ? "无" : String.join("；", state.getAssumptions()))
                 .append('\n');
-        sb.append("系统表结构与口径：\n").append(state.getTableSchemas()).append('\n');
+        sb.append("系统表结构与说明：\n").append(state.getTableSchemas()).append('\n');
         if (state.getRetryCount() != null && state.getRetryCount() > 0 && state.getError() != null) {
             sb.append("上一轮生成的 SQL：").append(state.getSql()).append('\n');
             sb.append("上一轮的问题：").append(state.getError()).append('\n');
