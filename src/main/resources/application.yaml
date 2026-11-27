@@ -42,20 +42,56 @@ spring:
           temperature: 0
     mcp:
       client:
-        # Exa / Tavily 官方端点都是 Streamable HTTP（POST /mcp），不是旧版 SSE。
-        # 配成 sse.connections 时框架会自动拼 /sse，请求 /mcp/sse 直接 404。
-        # 注意：url 只写到域名，框架会自动拼 endpoint（默认 /mcp），别把路径重复写进去。
-        streamable-http:
+        # 默认关闭：联网搜索是增强能力，主链路（Excel 查数）不依赖它。
+        # 打开后启动多约 6-8s（npx 拉起 + 握手），关着不影响任何功能。
+        enabled: ${insightlens.mcp.enabled:false}
+        # 注意：request-timeout 只管「连接建立之后的调用」。initialize 握手用的是
+        # MCP Java SDK 自己的 initializationTimeout，默认 20 秒且 Spring AI 1.1.2
+        # 没把它暴露成配置项 —— 这里写 60s 也改不了那个 20s 硬上限。
+        # 应对办法在 Electron 侧：起后端之前先预热一次 open-websearch
+        # （main.cjs 的 warmUpWebSearch），热态下实测握手 0.15–4 秒。
+        request-timeout: 60s
+        # ==== 方案 A：本地 stdio（中文引擎，无需 key） ====
+        # open-websearch（Aas-ee/open-webSearch，Apache-2.0）不是搜索 API：
+        # 它在本机起一个 Node 进程，抓百度/搜狗/Bing 的结果页再解析成 JSON，
+        # 所以零 key、零配额；代价是引擎改版会失效、高频会吃验证码。
+        #
+        # 运行时由 frontend/scripts/prepare-runtime.mjs 预置（幂等执行）：
+        #   runtime/node/node.exe                        ← 随应用分发的 Node
+        #   runtime/mcp/node_modules/open-websearch/...  ← 预装好的包（含依赖）
+        # Electron 启动时用 -Dinsightlens.mcp.node / -Dinsightlens.mcp.websearch-script
+        # 把两个绝对路径传进来。不走 npx：它每次启动多花约 5 秒解析包，
+        # 还要求目标机器自己装了 Node。
+        #
+        # 注意：MCP 初始化失败是「启动致命」而不是降级 —— Spring AI 的
+        # toolCallbackResolver 在启动期就要拿到工具列表，拿不到整个 context 就崩，
+        # ReActAgentRunner 上的 required=false 救不了。因此下面两个占位符的默认值
+        # 故意留成「文件不存在」：McpSearchGuard 发现入口缺失时会直接把
+        # spring.ai.mcp.client.enabled 压成 false，应用照常启动，只是没有联网搜索。
+        stdio:
           connections:
-            # Exa keyless：裸 URL 即可用，免费限流，无需注册或 API key
-            exa:
-              url: https://mcp.exa.ai
-            # Tavily 用 API key：Spring AI 1.1.2 的 MCP 连接参数配不了 header，
-            # 官方支持把 key 放 URL 参数，占位符从 application-local.yaml（不进 git）读取。
-            # keyless 模式需 X-Tavily-Access-Mode header，本版本配不了，故不用。
-            tavily:
-              url: https://mcp.tavily.com
-              endpoint: /mcp/?tavilyApiKey=${tavily.api-key}
+            websearch:
+              command: ${insightlens.mcp.node:node}
+              # 单引号必须有：Windows 路径里全是反斜杠，双引号会被当转义字符
+              args: ['${insightlens.mcp.websearch-script:}']
+              env:
+                MODE: stdio
+                # 中文内容为主的场景用百度，比 bing 稳（bing 反爬最勤）
+                DEFAULT_SEARCH_ENGINE: baidu
+                ALLOWED_SEARCH_ENGINES: baidu,sogou,bing,csdn,juejin,duckduckgo
+        # ==== 方案 B：远程 streamable-http（Exa，已停用） ====
+        # 2026-11-27 实测可用：initialize 返回 200 + text/event-stream，
+        # listTools() 拿到 web_search_exa / web_fetch_exa。
+        # 但 SDK 在 initialize 之后会开一条 GET 长连接收服务端通知，Exa 对 GET 回 405，
+        # SDK 0.14.0 把规范允许的拒绝打成整屏 WARN 堆栈（工具本身正常）。
+        # 现在 open-websearch 已覆盖 bing/duckduckgo，Exa 边际价值低还拖慢启动约 1.5s，
+        # 故停用。要恢复英文语义检索：取消下面四行注释即可（可与方案 A 同时开）。
+        # 另：Tavily 不要加回来，它的 /mcp 已改成 OAuth 2.0 保护资源（返回 401），
+        # 老的 ?tavilyApiKey=xxx 传参作废，Spring AI 1.1.2 的连接参数也配不了 header。
+        # streamable-http:
+        #   connections:
+        #     exa:
+        #       url: https://mcp.exa.ai
 
 
   servlet:
