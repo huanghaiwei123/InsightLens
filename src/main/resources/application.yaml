@@ -49,25 +49,23 @@ spring:
           parallel-tool-calls: false
     mcp:
       client:
-        # 恒为 false：不启用 Spring AI 的自动装配，改由 McpSearchConfig 手动创建客户端。
-        # 原因：auto-config 在上下文刷新时同步 initialize，握手超时用的是 MCP SDK 硬编码的
-        # initializationTimeout=20s，而 Spring AI 1.1.2 只暴露了 requestTimeout，改不动它。
-        # open-websearch 冷加载 6000+ 文件实测 16-25s，必然 TimeoutException 把整个
-        # ApplicationContext 拖挂 —— 表现就是「insightlens.mcp.enabled 改成 true 后启动超时」。
-        # McpSearchConfig 把握手超时放宽到 60s，且初始化失败只降级、不抛异常。
+        # 默认关闭：联网搜索是增强能力，主链路（Excel 查数）不依赖它。
+        # 打开后启动多约 6-8s（node 拉起 + 握手），关着完全不影响任何功能。
         #
-        # 联网开关本身仍是 insightlens.mcp.enabled：Electron 通过 -D 传，
-        # 开发态可以 INSIGHTLENS_MCP_ENABLED=true mvn spring-boot:run，
-        # 入口脚本路径由 McpSearchGuard 自动探测 frontend/runtime 下的预置包。
-        enabled: false
+        # 唯一的开启路径是 Electron：起后端前先预热 open-websearch（main.cjs 的
+        # warmUpWebSearch 确认热态可用），再用 -Dinsightlens.mcp.enabled=true 传进来。
+        # IDEA 直接 Run、mvn spring-boot:run 都不传这个参数，落在下面的默认值 false 上，
+        # 纯本地查数 —— 不要为了「顺手试试联网」把默认值改成 true：
+        # Spring AI 的自动装配在上下文刷新时同步 initialize，超时是 MCP SDK 硬编码的
+        # initializationTimeout=20s（1.1.2 只暴露 requestTimeout，改不动），
+        # 而 open-websearch 冷加载 6000+ 文件实测 16-25s，没有预热就必然
+        # TimeoutException，整个 ApplicationContext 建不起来。
+        enabled: ${insightlens.mcp.enabled:false}
         # 注意：request-timeout 只管「连接建立之后的调用」。initialize 握手用的是
         # MCP Java SDK 自己的 initializationTimeout，默认 20 秒且 Spring AI 1.1.2
         # 没把它暴露成配置项 —— 这里写 60s 也改不了那个 20s 硬上限。
         # 应对办法在 Electron 侧：起后端之前先预热一次 open-websearch
         # （main.cjs 的 warmUpWebSearch），热态下实测握手 0.15–4 秒。
-        # 下面 request-timeout 与 stdio.connections 已不生效（自动装配被上面关掉了），
-        # 仅作文档保留：真实装配参数在 McpSearchConfig —— 60s 握手超时、60s 调用超时、
-        # 以及 MODE / DEFAULT_SEARCH_ENGINE / ALLOWED_SEARCH_ENGINES 三个环境变量。
         request-timeout: 60s
         # ==== 方案 A：本地 stdio（中文引擎，无需 key） ====
         # open-websearch（Aas-ee/open-webSearch，Apache-2.0）不是搜索 API：
