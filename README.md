@@ -56,13 +56,11 @@ InsightLens 把这条链路压到一次对话：**上传表格 → 用中文问 
 |---|---|
 | 操作系统 | Windows 10 / 11（64 位） |
 | 内存 | 建议 4 GB 以上（应用自身约占用 1 GB 堆） |
-| 磁盘 | 安装包约 240 MB，装完约占 600 MB |
-| **Java** | **必须安装 JDK 17 或更高版本，并加入 `PATH`** |
+| 磁盘 | 安装包约 400 MB，装完约占 900 MB |
+| Java | **无需安装**，安装包已内置 Java 17 运行时 |
 
-> 为什么还要装 Java：应用主体是 Spring Boot 后端，为控制安装包体积**没有内置 JRE**，启动时由桌面壳调用系统 `java`。
-> 安装后可在命令行执行 `java -version` 验证，输出 `17.x` 及以上即可。
-> 没有 Java 时，启动会弹出「后端启动失败：请确认已安装 JDK 17 并在 PATH 中」。
-> 下载地址：<https://adoptium.net/temurin/releases/?version=17>
+> 后端是 Spring Boot 应用，安装包内已带一份用 `jlink` 裁剪过的 Java 17 运行时（约 45 MB，只保留实际用到的模块），启动时由桌面壳直接调用，**不需要你另外装 Java**，也不受系统里已有的 Java 版本影响。
+> 只有从源码运行（`mvnw spring-boot:run` 或 `npm run electron`）时才需要本机 JDK 17+。
 
 ### 下载步骤
 
@@ -162,7 +160,7 @@ InsightLens 把这条链路压到一次对话：**上传表格 → 用中文问 
 
 ```
 ┌───────────────────────────── Electron 35（桌面壳）─────────────────────────────┐
-│  启动时挑空闲端口 → spawn java（Spring Boot）→ 等 /personal/config 就绪 → 加载页面  │
+│  启动时挑空闲端口 → spawn 内置 JRE（Spring Boot）→ 等 /personal/config 就绪 → 加载页面 │
 │  自动更新：electron-updater + GitHub Releases                                    │
 └───────────────────────────────────┬───────────────────────────────────────────┘
                                     │ HTTP / SSE
@@ -256,13 +254,21 @@ npm run electron
 ## 打包发布
 
 ```bash
-# 1. 先出后端产物：electron-builder 会把 target/classes 与 target/lib 打进安装包
+# 1. 先出后端产物：electron-builder 会把 target/classes、target/lib 和 fat jar 一起打进安装包
 ./mvnw clean package -DskipTests
 
-# 2. 再出前端 + 安装包（会自动先跑 vite build）
+# 2. 再出前端 + 安装包（会自动先跑 prepare-jre、vite build）
 cd frontend
 npm run dist
 ```
+
+`npm run dist` 的 `predist` 会依次做三件事，缺一步都可能导致装出来的应用起不来：
+
+1. `prepare-jre.mjs` —— 用本机 JDK 17–24 的 `jlink` 裁一份 Java 运行时到 `runtime/jre`（约 45 MB）。已存在且版本匹配就跳过。
+   它不进 git（45 MB 二进制，改了脚本就要多存一份），换机器打包时本机必须有 JDK。
+   找不到 JDK 时会直接报错并列出已排查的路径，可用 `INSIGHTLENS_JDK=<JDK 根目录>` 指定。
+2. `prepare-runtime.mjs` —— 准备联网搜索用的离线 Node 运行时。
+3. `vite build` —— 前端产物写入 `src/main/resources/static`。
 
 产物在 `frontend/release/`，需要上传到 GitHub Release 的是三个文件：
 
@@ -273,10 +279,11 @@ npm run dist
 | `latest.yml` | 版本清单，自动更新靠它判断有没有新版本 |
 
 > `frontend/release/` 已被 `.gitignore` 忽略。安装包走 Release 附件，不进仓库。
+> `frontend/runtime/`（含 `jre` 与 `mcp`）同样被忽略，由脚本生成。
 
 发版顺序（顺序错了会出现「更新检查失败」或「装完还是旧代码」）：
 
-1. 改 `frontend/package.json` 的 `version`；
+1. 改 `frontend/package.json` 的 `version`（必须改，否则已装用户收不到更新提示）；
 2. `./mvnw clean package` → `cd frontend && npm run dist`；
 3. 提交并打 tag：`git tag v0.1.0 && git push origin v0.1.0`；
 4. GitHub 上新建 Release，选该 tag，上传上面三个文件；
@@ -286,11 +293,12 @@ npm run dist
 
 **Q：双击图标后白屏 / 一直转圈？**
 先看 `%APPDATA%\insightlens-frontend\backend.log`。绝大多数是这两类：
-① 没装 JDK 17，或装了但没进 `PATH`（命令行 `java -version` 验证）；
-② 安装包不完整——重装一次。
+① 安装包不完整——`resources\runtime\jre` 缺失或被杀毒软件隔离，重装一次并把安装目录加进白名单；
+② 端口被占——应用会自动挑空闲端口，但若本机有代理软件拦截本地回环请求，页面拿不到后端。
 
-**Q：提示「后端启动失败」但 Java 明明装了？**
-`PATH` 里放的是 JRE 而不是 JDK，或存在多个 Java 版本指向了 8/11。用 `where java` 看实际命中的是哪一个。
+**Q：为什么启动时提示「本机没有找到 java」？**
+说明跑的不是安装包，而是从源码启动（`npm run electron`），此时才会调用系统 `java`。
+在 `frontend` 目录执行 `npm run jre` 生成内置运行时，或安装 JDK 17 并加入 `PATH`。
 
 **Q：上传 Excel 报「文件被占用」？**
 该文件正被 Excel / WPS 打开。关掉再传。判断依据是目录里出现 `~$` 开头的临时锁文件。
