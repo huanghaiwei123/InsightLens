@@ -1,5 +1,6 @@
 package com.gdou.agent.orchestration.node.impl;
 
+import com.gdou.agent.infra.constant.SchemaConstant;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
 import com.gdou.agent.orchestration.node.Node;
@@ -39,11 +40,6 @@ import java.util.regex.Pattern;
 @Slf4j
 @Service(NodeName.SQL_GUARD)
 public class SqlGuardNode implements Node {
-
-    /** 系统表：提示词约定模型可查这些元数据表，与可用表清单共同构成白名单 */
-    private static final Set<String> SYSTEM_TABLES = Set.of(
-            "session", "message", "category", "file_view",
-            "evaluation_run", "eval_case_result", "trace_span");
 
     /** 危险关键词：出现在语句任意位置（含 CTE 内部）即拒绝 */
     private static final Pattern FORBIDDEN_KEYWORDS = Pattern.compile(
@@ -118,7 +114,7 @@ public class SqlGuardNode implements Node {
 
         // ⑤ 表名白名单：主路径用 JSqlParser 提取全部表名（含子查询），
         //    解析失败时退化为 FROM/JOIN 正则——宁可粗一点，不能因为方言问题放行
-        Set<String> whitelist = new HashSet<>(SYSTEM_TABLES);
+        Set<String> whitelist = new HashSet<>(SchemaConstant.SYSTEM_TABLES);
         if (state.getCandidateTables() != null) {
             for (String t : state.getCandidateTables()) {
                 whitelist.add(t.toLowerCase());

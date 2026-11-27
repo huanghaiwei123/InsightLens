@@ -1,5 +1,6 @@
 package com.gdou.agent.orchestration.node.impl;
 
+import com.gdou.agent.infra.constant.SchemaConstant;
 import com.gdou.agent.infra.holder.SessionHolder;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
@@ -42,11 +43,6 @@ import java.util.Set;
 @Slf4j
 @Service(NodeName.SCHEMA_RETRIEVE)
 public class SchemaRetrieveNode implements Node {
-
-    /** 系统表 DDL 恒定附带：提示词允许模型查这些元数据表界定批次，必须提供列信息 */
-    private static final Set<String> SYSTEM_TABLES = Set.of(
-            "session", "message", "category", "file_view",
-            "evaluation_run", "eval_case_result", "trace_span");
 
     /** eval:// 这类伪协议是评测造数文件，没有真实 Excel，不能喂给模型读 */
     private static final String PSEUDO_PATH = "^[A-Za-z][A-Za-z0-9+.-]*://.*";
@@ -108,20 +104,21 @@ public class SchemaRetrieveNode implements Node {
                     .append("  路径：").append(path).append("\n")
                     .append("  列：").append(String.join(", ", columns)).append("\n");
         }
+        Set<String> systemTables = SchemaConstant.SYSTEM_TABLES;
         // 表名白名单只留系统表：用户数据改走 read_xlsx 路径校验，
         // 不再把 Excel 文件名塞进 candidateTables 让模型误以为是表。
-        state.setCandidateTables(new ArrayList<>(SYSTEM_TABLES));
+        state.setCandidateTables(new ArrayList<>(systemTables));
         state.setAllowedFilePaths(new ArrayList<>(allowed));
         String fileCatalog = catalog.toString().trim();
         state.setFileCatalog(fileCatalog.isEmpty() ? null : fileCatalog);
         log.info("[schema] 本分类可用文件 sheet 数={}, 去重路径数={}", seenSheet.size(), allowed.size());
 
         // 系统表 DDL 恒带：模型可能关联 file_view 等元数据表，不给列信息会凭空捏造字段
-        String placeholders = String.join(",", Collections.nCopies(SYSTEM_TABLES.size(), "?"));
+        String placeholders = String.join(",", Collections.nCopies(systemTables.size(), "?"));
         List<String> ddlList = jdbc.query(
                 "select sql from duckdb_tables()"
                         + " where schema_name = 'main' and lower(table_name) in (" + placeholders + ")",
-                (rs, rowNum) -> rs.getString("sql"), SYSTEM_TABLES.toArray());
+                (rs, rowNum) -> rs.getString("sql"), systemTables.toArray());
 
         // 表注释写在 COMMENT ON 里，CREATE 语句不带；补注入给模型理解系统表用途（只取系统表）。
         // 注释不是业务口径来源——用户数据的口径由澄清阶段的 assumptions 给出。
@@ -129,13 +126,13 @@ public class SchemaRetrieveNode implements Node {
                 "select '-- 表注释 ' || table_name || '：' || comment from duckdb_tables()"
                         + " where schema_name = 'main' and comment is not null and comment <> ''"
                         + " and lower(table_name) in (" + placeholders + ")",
-                (rs, rowNum) -> rs.getString(1).replace("\n", " "), SYSTEM_TABLES.toArray());
+                (rs, rowNum) -> rs.getString(1).replace("\n", " "), systemTables.toArray());
         List<String> columnComments = jdbc.query(
                 "select '-- 列注释 ' || table_name || '.' || column_name || '：' || comment from duckdb_columns()"
                         + " where schema_name = 'main' and comment is not null and comment <> ''"
                         + " and lower(table_name) in (" + placeholders + ")"
                         + " order by table_name, column_index",
-                (rs, rowNum) -> rs.getString(1).replace("\n", " "), SYSTEM_TABLES.toArray());
+                (rs, rowNum) -> rs.getString(1).replace("\n", " "), systemTables.toArray());
 
         StringBuilder sb = new StringBuilder();
         ddlList.stream().filter(Objects::nonNull).forEach(ddl -> sb.append(ddl).append('\n'));
