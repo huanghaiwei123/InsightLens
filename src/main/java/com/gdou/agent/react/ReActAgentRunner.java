@@ -22,7 +22,9 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Component
 @Slf4j
@@ -61,28 +63,45 @@ public class ReActAgentRunner {
         if (searchTools.length == 0) {
             log.warn("[react] 无可用联网搜索工具，本轮仅使用本地工具");
         }
+        // 提示词必须按「本轮实际挂上的工具」描述能力：MCP 关闭时模型手里没有任何搜索工具，
+        // 若仍告诉它可以联网，它只会回一句「联网工具无法使用」，用户看到会以为程序坏了。
+        boolean hasSearch = searchTools.length > 0;
+        String searchCapability = hasSearch
+                ? "- 联网搜索工具（" + Arrays.stream(searchTools)
+                        .map(t -> t.getToolDefinition().name())
+                        .collect(Collectors.joining("、"))
+                        + "）：检索表格之外的外部信息与公开资料。表格内已有的数据优先用 query，"
+                        + "不要用联网搜索代替查询。"
+                : "- 本轮没有联网搜索工具。只回答已上传表格范围内的问题：用户要求查外部信息时，"
+                        + "据实说明当前无法联网检索；不要声称正在或已经联网，也不要编造外部资料。";
+        String toolCoop = hasSearch
+                ? "- 问题同时涉及本地数据与外部信息时，先用 query 查本地数据，再按需联网检索，最后综合回答。"
+                : "- 用户问到已上传表格之外的内容时，说明缺哪份数据、需要上传什么，不要用推测代替。";
         // 当前北京时间注入到系统提示词：默认时区就是北京时间，用户问「现在几点 / 今天几号」时据此回答，
         // 不再以「无法读取实时钟表」为由拒答。时钟只读这一处，精度到分钟（本轮请求时刻）。
         String now = ZonedDateTime.now(ZoneId.of("Asia/Shanghai"))
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"));
+        String opening = hasSearch
+                ? "你是数据分析助手，可调用工具查询用户上传的表格数据、管理工作目录中的文件与分类，并在需要时联网检索。"
+                : "你是数据分析助手，可调用工具查询用户上传的表格数据、管理工作目录中的文件与分类。";
         ReactAgent agent = ReactAgent.builder()
                 .name("insight_lens_ReActAgent")
                 .model(apiKeyService.chatModel())
                 .instruction("""
-                        你是数据分析助手，可调用工具查询用户上传的表格数据、管理工作目录中的文件与分类，并在需要时联网检索。
+                        %1$s
 
                         【当前时间】
-                        现在是 %s（北京时间，UTC+8）。本系统默认时区为北京时间：用户未指明时区的时间问题一律按北京时间理解与换算。
+                        现在是 %2$s（北京时间，UTC+8）。本系统默认时区为北京时间：用户未指明时区的时间问题一律按北京时间理解与换算。
                         用户问「现在几点 / 今天几号 / 当前时间」时，直接基于该时间回答；它精确到分钟、是本轮提问时刻，不是实时走动的钟表，无需再强调无法读取实时时间。
 
                         【可用工具】
                         - query：查询已上传表格中的数据（数字、指标、趋势、明细）。输入是单个已拆解的数据子问题。
                         - create：在工作目录下创建分类文件夹。输入是相对工作目录的分类路径，可创建多层路径。
                         - transfer：把指定文件移动到目标分类路径。输入为源文件相对路径与目标分类相对路径。
-                        - 联网搜索工具：检索表格之外的外部信息与公开资料。表格内已有的数据优先用 query，不要用联网搜索代替查询。
+                        %3$s
 
                         【工具协作】
-                        - 问题同时涉及本地数据与外部信息时，先用 query 查本地数据，再按需联网检索，最后综合回答。
+                        %4$s
                         - 涉及文件归类调整时用 create / transfer，操作后简要告知用户结果。
 
                         【query 返回值解读】
@@ -102,7 +121,7 @@ public class ReActAgentRunner {
                         - 一次只把拆解好的单个数据子问题传给 query。
                         - 数据范围以当前已上传的表格为准。问到没有对应表格或字段的内容，据实说明缺少什么数据，不要猜测或编造。
                         - 分类路径一律使用相对工作目录的路径。
-                        """.formatted(now))
+                        """.formatted(opening, now, searchCapability, toolCoop))
                 .methodTools(
                         new FileOrFolderTool(folderTool, fileTool),
                         new SqlQueryTool(runner, ctx, sessionId, categoryId)
