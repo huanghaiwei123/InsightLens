@@ -1,6 +1,15 @@
 -- =============================================================================
 -- InsightLens · 应用元数据库 DDL（DuckDB 方言）
 -- =============================================================================
+-- 【为什么整份脚本包在一个事务里】
+--   mode: always 意味着每次启动都会重跑本脚本。实测：不包事务时，20 多条
+--   COMMENT ON 每条都单独提交一次 catalog 变更 + fsync WAL，光建表段就要
+--   6-11 秒（DuckDB 单文件、单写者，提交代价远高于语句本身）。
+--   包进一个事务后只在 COMMIT 时落一次盘，同一段降到约 3 秒。
+--   启动耗时的第一优化项就是这两行，别删。
+-- =============================================================================
+BEGIN TRANSACTION;
+
 -- 用途：存"应用自己产生的数据"——会话、上传批次、评测结果、Trace。
 --       不存任何业务明细（业务明细在分析数据源的 .duckdb 文件里）。
 -- 引擎：DuckDB 单文件（实际库：data/app.duckdb）
@@ -245,3 +254,6 @@ CREATE INDEX IF NOT EXISTS idx_trace_span_trace
 --    INSERT INTO trace_span(trace_id, node, start_at, attrs)
 --      VALUES ('t-1', 'clarify', now(), '{"model":"deepseek-v4-flash","tokens":812}');
 --    SELECT id, attrs->>'model' AS model FROM trace_span;
+
+-- 与文首 BEGIN TRANSACTION 配对：DDL 全部成功后一次性提交
+COMMIT;
