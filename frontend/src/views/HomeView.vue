@@ -25,7 +25,7 @@ onMounted(() => {
 
 const steps = [
   { n: '01', t: '放好表格', d: '把 Excel 上传到工作目录，系统自动读懂每个 sheet 并归类。' },
-  { n: '02', t: '直接提问', d: '用日常语言问数据，比如「上周各品类的退款率是多少」。' },
+  { n: '02', t: '直接提问', d: '用日常语言问数据，不用记字段名——「各科平均分多少」「哪些商品压了库存」都行。' },
   { n: '03', t: '查看报表', d: '按分类浏览已登记的数据资产，随时定位到原始文件。' }
 ]
 </script>
@@ -42,7 +42,7 @@ const steps = [
       <div class="card stat sp-3"><div class="num accent">{{ stats.files }}</div><div class="lbl">已登记文件</div></div>
       <div class="card stat sp-3"><div class="num">{{ stats.sheets }}</div><div class="lbl">数据表（sheet）</div></div>
       <div class="card stat sp-3"><div class="num">{{ stats.rows.toLocaleString() }}</div><div class="lbl">可查询数据行</div></div>
-      <div class="card stat sp-3"><div class="num">{{ report.length }}</div><div class="lbl">业务分类</div></div>
+      <div class="card stat sp-3"><div class="num">{{ report.length }}</div><div class="lbl">数据分类</div></div>
 
       <div class="card sp-12">
         <h2>三步开始</h2>
