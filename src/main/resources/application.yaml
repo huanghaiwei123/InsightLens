@@ -43,7 +43,12 @@ spring:
     mcp:
       client:
         # 默认关闭：联网搜索是增强能力，主链路（Excel 查数）不依赖它。
-        # 打开后启动多约 6-8s（npx 拉起 + 握手），关着不影响任何功能。
+        # 打开后启动多约 6-8s（node 拉起 + 握手），关着不影响任何功能。
+        #
+        # 开发态（mvn spring-boot:run）想用联网，加环境变量即可：
+        #   INSIGHTLENS_MCP_ENABLED=true mvn spring-boot:run
+        # 入口脚本不用指定 —— McpSearchGuard 会自动探测 frontend/runtime 下
+        # prepare-runtime.mjs 预置好的 open-websearch。
         enabled: ${insightlens.mcp.enabled:false}
         # 注意：request-timeout 只管「连接建立之后的调用」。initialize 握手用的是
         # MCP Java SDK 自己的 initializationTimeout，默认 20 秒且 Spring AI 1.1.2

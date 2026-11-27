@@ -41,6 +41,18 @@ public class McpSearchGuard implements EnvironmentPostProcessor, Ordered {
             return;
         }
 
+        // 开发态：-D 参数只有 Electron 会传，mvn spring-boot:run 不会。
+        // 只要项目里已经 npm run runtime 预置过 open-websearch，就直接认领它，
+        // 免得本地跑起来永远没有联网搜索（表现是模型回一句「联网工具不可用」）。
+        Path bundled = detectBundledScript();
+        if (bundled != null) {
+            Map<String, Object> detected = new HashMap<>();
+            detected.put(SCRIPT_KEY, bundled.toString());
+            environment.getPropertySources().addFirst(new MapPropertySource("mcpSearchGuardDetected", detected));
+            System.err.println("[mcp] 未指定 " + SCRIPT_KEY + "，自动使用项目内置运行时：" + bundled);
+            return;
+        }
+
         Map<String, Object> override = new HashMap<>();
         override.put("spring.ai.mcp.client.enabled", "false");
         // addFirst：优先级高于 application.yaml 里的 ${insightlens.mcp.enabled}
@@ -60,6 +72,40 @@ public class McpSearchGuard implements EnvironmentPostProcessor, Ordered {
         } catch (InvalidPathException e) {
             return false;
         }
+    }
+
+    /**
+     * 在项目目录里找 prepare-runtime.mjs 预置好的入口。
+     *
+     * <p>从 {@code user.dir} 往上找三级：{@code mvn spring-boot:run} 的 user.dir 是项目根，
+     * 从 frontend 目录或 IDE 子模块目录启动时也能命中。找不到返回 null，
+     * 由调用方降级为「无联网搜索」。
+     */
+    private Path detectBundledScript() {
+        String userDir = System.getProperty("user.dir", "");
+        if (userDir.isBlank()) {
+            return null;
+        }
+        String[] relatives = {
+                "frontend/runtime/mcp/node_modules/open-websearch/build/index.js",
+                "runtime/mcp/node_modules/open-websearch/build/index.js"
+        };
+        Path base;
+        try {
+            base = Path.of(userDir);
+        } catch (InvalidPathException e) {
+            return null;
+        }
+        for (int depth = 0; depth < 3 && base != null; depth++) {
+            for (String relative : relatives) {
+                Path candidate = base.resolve(relative);
+                if (Files.isRegularFile(candidate)) {
+                    return candidate.toAbsolutePath().normalize();
+                }
+            }
+            base = base.getParent();
+        }
+        return null;
     }
 
     @Override
