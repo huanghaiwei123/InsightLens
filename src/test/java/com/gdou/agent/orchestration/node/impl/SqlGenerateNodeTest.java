@@ -119,4 +119,33 @@ class SqlGenerateNodeTest {
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("sql 字段为空");
     }
+
+    @Test
+    @DisplayName("上游有数据可用性评估时注入用户消息，模型据此规划查询")
+    void includesDataAssessment() {
+        state.setDataSufficiency("partial");
+        state.setDataLimitations(new String[]{"缺少「级别」列，无法按级别数值精确排序"});
+        state.setQueryPlan("按会员等级名称的业务顺序排序");
+        when(llmClient.call(anyList())).thenReturn(
+                "{\"sql\":\"select 会员等级 from sales limit 10\",\"sql_explain\":\"按等级名称顺序取最高\"}");
+
+        node.apply(state, CTX);
+
+        assertThat(userMessage())
+                .contains("数据可用性评估")
+                .contains("结论：partial")
+                .contains("缺少「级别」列")
+                .contains("查询建议：按会员等级名称的业务顺序排序");
+    }
+
+    @Test
+    @DisplayName("未评估时不输出评估块，输入与旧版完全一致")
+    void omitsAssessmentWhenAbsent() {
+        when(llmClient.call(anyList())).thenReturn(
+                "{\"sql\":\"select category from sales limit 10\",\"sql_explain\":\"按品类\"}");
+
+        node.apply(state, CTX);
+
+        assertThat(userMessage()).doesNotContain("数据可用性评估");
+    }
 }

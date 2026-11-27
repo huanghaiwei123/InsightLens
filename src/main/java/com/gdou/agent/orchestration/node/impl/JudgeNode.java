@@ -98,6 +98,18 @@ public class JudgeNode implements Node {
         builder.append("口径假设：").append(state.getAssumptions() == null ? "[]" : Arrays.toString(state.getAssumptions())).append("\n");
         builder.append("生成的sql：").append(state.getSql()).append("\n");
         builder.append("执行结果：").append(rows.toString()).append("rowCount=").append(state.getRowCount()).append("\n");
+        // 数据本身的缺口（缺列、只能近似）是上游在列结构阶段就确认过的，
+        // 给 judge 是为了两件事：不把「数据限制」误判成 SQL 写错，以及在回答里如实交代局限。
+        if (state.getDataSufficiency() != null) {
+            builder.append("数据可用性评估：结论=").append(state.getDataSufficiency());
+            if (state.getDataLimitations() != null && state.getDataLimitations().length > 0) {
+                builder.append("；缺失=").append(String.join("；", state.getDataLimitations()));
+            }
+            if (state.getDataLimitationNote() != null) {
+                builder.append("；说明=").append(state.getDataLimitationNote());
+            }
+            builder.append("\n");
+        }
         return builder.toString();
     }
 

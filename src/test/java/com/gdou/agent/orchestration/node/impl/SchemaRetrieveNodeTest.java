@@ -1,5 +1,7 @@
 package com.gdou.agent.orchestration.node.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.gdou.agent.infra.llm.LlmClient;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
@@ -7,6 +9,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
@@ -19,6 +24,11 @@ import java.sql.DriverManager;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 /**
  * ② Schema 检索节点：验证「喂给模型的是本分类真实 Excel 的路径 + 列结构」，
@@ -31,8 +41,15 @@ class SchemaRetrieveNodeTest {
     private Connection duckConn;
     private JdbcTemplate jdbc;
     private SchemaRetrieveNode node;
+    private LlmClient llmClient;
     private Path workspace;
     private AnalysisState state;
+
+    /** 默认评估结果：列齐全。个别用例覆盖成 partial / 不合法返回 */
+    private static final String DEFAULT_ASSESSMENT =
+            "{\"sufficiency\":\"sufficient\",\"missing\":[],"
+                    + "\"query_plan\":\"读取「会员充值.xlsx」的「充值」sheet，按「会员等级」汇总「充值金额」\","
+                    + "\"limitation\":\"\"}";
 
     @BeforeEach
     void setUp() throws Exception {
@@ -49,7 +66,12 @@ class SchemaRetrieveNodeTest {
                 + "file_path VARCHAR, sheet_name VARCHAR, row_count BIGINT, status VARCHAR)");
 
         node = new SchemaRetrieveNode();
+        llmClient = mock(LlmClient.class);
+        // 评估每次都会调用模型，默认给一个「可满足」结果；需要其他结论的用例自行覆盖
+        when(llmClient.call(anyList())).thenReturn(DEFAULT_ASSESSMENT);
         ReflectionTestUtils.setField(node, "jdbc", jdbc);
+        ReflectionTestUtils.setField(node, "llmClient", llmClient);
+        ReflectionTestUtils.setField(node, "objectMapper", new ObjectMapper());
         ReflectionTestUtils.setField(node, "workSpace", workspace.toString());
         state = new AnalysisState();
     }
@@ -120,5 +142,55 @@ class SchemaRetrieveNodeTest {
         List<String> allowed = state.getAllowedFilePaths();
         assertThat(allowed).hasSize(1);
         assertThat(allowed.get(0)).endsWith("会员充值.xlsx");
+    }
+
+    @Test
+    @DisplayName("拿到列结构后评估数据可用性：结论/缺失项/查询建议/用户说明写入 state")
+    void assessesDataCapability() {
+        addFile(3, "会员充值.xlsx", "会员充值.xlsx", "充值", 3, "success");
+        state.setClarifiedQuestion("会员等级里最高级别是哪个");
+        when(llmClient.call(anyList())).thenReturn(
+                "{\"sufficiency\":\"partial\","
+                        + "\"missing\":[\"缺少「级别」列，无法按级别数值精确排序\"],"
+                        + "\"query_plan\":\"按会员等级名称的业务顺序排序\","
+                        + "\"limitation\":\"表里只有等级名称，没有级别数值\"}");
+
+        node.apply(state, CTX);
+
+        assertThat(state.getDataSufficiency()).isEqualTo("partial");
+        assertThat(state.getDataLimitations()).containsExactly("缺少「级别」列，无法按级别数值精确排序");
+        assertThat(state.getQueryPlan()).contains("业务顺序");
+        assertThat(state.getDataLimitationNote()).contains("只有等级名称");
+
+        // 评估必须看到真实列与问题，否则等于凭常识猜
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Message>> captor = ArgumentCaptor.forClass(List.class);
+        verify(llmClient).call(captor.capture());
+        String userMsg = ((UserMessage) captor.getValue().get(1)).getText();
+        assertThat(userMsg).contains("会员等级里最高级别是哪个").contains("会员等级", "充值金额");
+    }
+
+    @Test
+    @DisplayName("评估返回不是 JSON 时降级为未评估：不抛异常，文件清单照常产出")
+    void degradesWhenAssessmentFails() {
+        addFile(3, "会员充值.xlsx", "会员充值.xlsx", "充值", 3, "success");
+        when(llmClient.call(anyList())).thenReturn("抱歉，我无法判断");
+
+        node.apply(state, CTX);
+
+        assertThat(state.getDataSufficiency()).isNull();
+        assertThat(state.getDataLimitations()).isNull();
+        assertThat(state.getFileCatalog()).contains("会员充值.xlsx");
+        assertThat(state.getAllowedFilePaths()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("本分类没有文件时直接判 insufficient，不浪费一次模型调用")
+    void noFileMeansInsufficient() {
+        node.apply(state, CTX);
+
+        assertThat(state.getDataSufficiency()).isEqualTo("insufficient");
+        assertThat(state.getDataLimitations()).containsExactly("当前分类下没有可读的表格文件");
+        verifyNoInteractions(llmClient);
     }
 }

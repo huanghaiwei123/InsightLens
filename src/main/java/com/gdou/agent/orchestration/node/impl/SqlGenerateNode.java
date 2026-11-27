@@ -81,12 +81,41 @@ public class SqlGenerateNode implements Node {
         sb.append("口径假设：").append(
                 state.getAssumptions() == null ? "无" : String.join("；", state.getAssumptions()))
                 .append('\n');
+        // 上游已判定「这些列能做什么、缺什么」，模型据此规划查询，不用自己从列名反推问题边界
+        String assessment = buildAssessment(state);
+        if (assessment != null) {
+            sb.append(assessment);
+        }
         sb.append("系统表结构与说明：\n").append(state.getTableSchemas()).append('\n');
         if (state.getRetryCount() != null && state.getRetryCount() > 0 && state.getError() != null) {
             sb.append("上一轮生成的 SQL：").append(state.getSql()).append('\n');
             sb.append("上一轮的问题：").append(state.getError()).append('\n');
             sb.append("这是第 ").append(state.getRetryCount() + 1)
                     .append(" 次生成，请修正上述问题后重新输出。\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 拼「数据可用性评估」块。上游没评估成功（字段全空）时返回 null，
+     * 此时输入与旧版完全一致，模型行为不受影响——降级路径不额外增加提示词噪声。
+     */
+    private String buildAssessment(AnalysisState state) {
+        if (state.getDataSufficiency() == null
+                && state.getQueryPlan() == null
+                && (state.getDataLimitations() == null || state.getDataLimitations().length == 0)) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("数据可用性评估（上游已核对真实列，请按此规划查询；缺口只能用现有列近似，"
+                + "严禁为缺失项编造列名）：\n");
+        sb.append("- 结论：").append(state.getDataSufficiency() == null ? "未评估" : state.getDataSufficiency())
+                .append('\n');
+        if (state.getDataLimitations() != null && state.getDataLimitations().length > 0) {
+            sb.append("- 缺失项：").append(String.join("；", state.getDataLimitations())).append('\n');
+        }
+        if (state.getQueryPlan() != null) {
+            sb.append("- 查询建议：").append(state.getQueryPlan()).append('\n');
         }
         return sb.toString();
     }

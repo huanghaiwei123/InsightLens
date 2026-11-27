@@ -8,6 +8,9 @@ import com.gdou.agent.orchestration.RunContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -17,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -107,5 +111,26 @@ class JudgeNodeTest {
         assertThatThrownBy(() -> node.apply(state, CTX))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessageContaining("JSON 解析失败");
+    }
+
+    @Test
+    @DisplayName("数据可用性评估进用户消息，判定时才能区分「数据缺列」与「SQL 写错」")
+    void includesDataAssessment() {
+        state.setDataSufficiency("partial");
+        state.setDataLimitations(new String[]{"缺少「级别」列"});
+        state.setDataLimitationNote("表里只有等级名称");
+        when(llmClient.call(anyList())).thenReturn(
+                "{\"verdict\":\"ok\",\"reason\":\"\",\"answer\":\"最高等级是钻石\"}");
+
+        node.apply(state, CTX);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Message>> captor = ArgumentCaptor.forClass(List.class);
+        verify(llmClient).call(captor.capture());
+        String userMsg = ((UserMessage) captor.getValue().get(1)).getText();
+        assertThat(userMsg)
+                .contains("数据可用性评估：结论=partial")
+                .contains("缺失=缺少「级别」列")
+                .contains("说明=表里只有等级名称");
     }
 }

@@ -48,6 +48,25 @@ public class AnalysisState implements Serializable {
      */
     private java.util.List<String> allowedFilePaths;
 
+    /**
+     * 数据可用性判断：sufficient / partial / insufficient。
+     * 由 schema_retrieve 在拿到真实列结构后调用模型判定；只作为信息往下传，
+     * 不参与路由——判定偏严时若直接拦断链路，会重演「judge 死循环」。
+     */
+    private String dataSufficiency;
+
+    /** 模型列出的缺失项（缺哪一列、哪个维度、哪种口径），供 SQL 生成与最终回答共用；可为空 */
+    private String[] dataLimitations;
+
+    /**
+     * 建议的查询路径：读哪个文件 / 哪些列 / 如何计算。
+     * 注入 sql_generate，让它带着「要查什么」去写 SQL，而不是只看到一堆列名自己猜。
+     */
+    private String queryPlan;
+
+    /** 面向用户的局限说明（judge 生成最终回答时使用）；无局限时为 null */
+    private String dataLimitationNote;
+
     /** 当前生成的 SQL */
     private String sql;
 
