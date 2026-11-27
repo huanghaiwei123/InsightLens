@@ -10,6 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -55,20 +56,60 @@ public class FileTool {
 
 
 
+    /** 移动成功的文案前缀：调用方据此判断要不要同步 file_view 的路径 */
+    public static final String TRANSFER_OK = "文件移动成功";
+
     public String transfer(String source,  String target){
         Path sour = Path.of(workSpace, source);
         Path tar = Path.of(workSpace, target);
-        String category = source.substring(0, source.lastIndexOf("/"));
-        String file = source.substring(source.lastIndexOf("/") + 1);
+        // source 不带 "/" 时 lastIndexOf 返回 -1，原来的 substring(0,-1) 会直接抛越界
+        int slash = source.lastIndexOf('/');
+        String category = slash < 0 ? "" : source.substring(0, slash);
+        String file = slash < 0 ? source : source.substring(slash + 1);
         log.info("正在移动分类{}下的文件{}到分类{}",category,file,target);
+
+        // Excel / WPS 打开工作簿时会在同目录留一个「~$ + 文件名」的锁文件，此时文件被独占打开。
+        // Windows 上 Files.move 连改名都要独占句柄，必然失败。先看锁文件，能给出比
+        // 「另一个程序正在使用此文件」更准确的提示，也让用户知道该关什么。
+        if (isOpenedByOffice(sour)) {
+            log.warn("文件{}正被 Excel/WPS 打开（同目录存在 ~$ 锁文件），本轮跳过移动", sour.toAbsolutePath());
+            return "文件移动失败，路径 " + source + " 的表正被 Excel 或 WPS 打开，"
+                    + "请关闭该文件后重新归档；其余文件不受影响。";
+        }
         try {
             Files.createDirectories(tar);
             Files.move(sour,tar.resolve(file));
-            log.info("文件移动成功,分类{}下的文件{}已经进入分类{}下",source.substring(0,source.lastIndexOf("/")), file,target);
-            return "文件移动成功，分类路径"+source+"下的文件已经全部进入分类路径"+target+"下";
+            log.info("文件移动成功,分类{}下的文件{}已经进入分类{}下", category, file, target);
+            return TRANSFER_OK + "，分类路径"+source+"下的文件已经全部进入分类路径"+target+"下";
         } catch (IOException e) {
-            log.error("文件移动失败，请检查原因：{}",e.getMessage());
-            throw new RuntimeException(e);
+            // 不抛异常：一个文件没归位不该让整条上传链路失败 —— 抛出去会一路冒到
+            // upload 的 catch，用户看到「文件上传失败」，其实文件已经传上去了。
+            // 改成可读文案返回，模型据此告诉用户原因，其余文件继续处理。
+            log.error("文件移动失败，路径：{} -> {}，原因：{}",
+                    sour.toAbsolutePath(), tar.resolve(file).toAbsolutePath(), e.getMessage());
+            return "文件移动失败，路径 " + source + " 的文件可能正被其他程序占用，"
+                    + "请关闭后重试；其余文件不受影响。原因：" + e.getMessage();
+        }
+    }
+
+    /** transfer 的返回是否表示移动成功；调用方据此决定要不要同步 file_view 元数据 */
+    public static boolean isSuccess(String transferResult) {
+        return transferResult != null && transferResult.startsWith(TRANSFER_OK);
+    }
+
+    /**
+     * 是否正被 Excel / WPS 打开：Office 系打开工作簿时会在同目录建「~$ + 文件名」锁文件。
+     * 路径异常（拿不到父目录等）时按「未打开」处理，交给 Files.move 兜底。
+     */
+    private boolean isOpenedByOffice(Path file) {
+        Path dir = file.getParent();
+        if (dir == null) {
+            return false;
+        }
+        try {
+            return Files.exists(dir.resolve("~$" + file.getFileName()));
+        } catch (InvalidPathException e) {
+            return false;
         }
     }
 

@@ -29,6 +29,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -64,6 +65,10 @@ class UploadServiceImplTest {
     private static UploadServiceImpl serviceWith(FolderTool folderTool, FileTool fileTool,
                                                  CategoryService categoryService,
                                                  FileViewService fileViewService) {
+        // 默认模拟「移动成功」：FileTool.transfer 现在用返回值表达成败（失败不再抛异常），
+        // 未 stub 的 mock 会返回 null，被判为失败，元数据就不会回写。
+        // 要验证失败分支的用例自己把这个桩改写成失败文案即可。
+        when(fileTool.transfer(anyString(), anyString())).thenReturn(FileTool.TRANSFER_OK);
         UploadServiceImpl service = new UploadServiceImpl();
         ReflectionTestUtils.setField(service, "objectMapper", MAPPER);
         ReflectionTestUtils.setField(service, "folderTool", folderTool);
@@ -227,6 +232,31 @@ class UploadServiceImplTest {
         // where 值（文件名）与 filePath 值相同，MyBatis-Plus 会共用占位符，values 去重后是这两项
         assertThat(uw.getValue().getParamNameValuePairs().values())
                 .contains("电商运营/历史订单/订单_a1b2c3d4.xlsx", 7);
+    }
+
+    @Test
+    @DisplayName("移动失败（文件被 Excel/WPS 占用）：不回写元数据，也不抛异常")
+    void transferFailureSkipsMetadata() {
+        FolderTool folderTool = mock(FolderTool.class);
+        FileTool fileTool = mock(FileTool.class);
+        CategoryService categoryService = mock(CategoryService.class);
+        FileViewService fileViewService = mock(FileViewService.class);
+
+        UploadServiceImpl service = serviceWith(folderTool, fileTool, categoryService, fileViewService);
+        // 覆盖 serviceWith 的默认成功桩：模拟文件正被 WPS 打开、无法移动
+        when(fileTool.transfer(anyString(), anyString()))
+                .thenReturn("文件移动失败，路径 客户服务/工单.xlsx 的表正被 Excel 或 WPS 打开，"
+                        + "请关闭该文件后重新归档；其余文件不受影响。");
+
+        String answer = """
+                {"transfers":[{"fileName":"工单.xlsx","from":"客户服务","to":"客户服务/客服工单"}],"create":null,"delete":null}
+                """;
+        call(service, answer);
+
+        verify(fileTool).transfer("客户服务/工单.xlsx", "客户服务/客服工单");
+        // 文件仍在原目录：元数据必须保持不动，否则报表里的路径指向不存在的文件
+        verify(categoryService, never()).getOne(any(LambdaQueryWrapper.class));
+        verify(fileViewService, never()).update(any(LambdaUpdateWrapper.class));
     }
 
     @Test

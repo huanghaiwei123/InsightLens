@@ -278,10 +278,14 @@ public class UploadServiceImpl implements UploadService {
                 }
             }
             for (FileTransfer transfer : transfers) {
+                String moveResult = null;
                 if(transfer.from()!=null && transfer.to()!=null && transfer.fileName()!=null) {
-                    fileTool.transfer(transfer.from()+"/"+transfer.fileName(), transfer.to());
+                    moveResult = fileTool.transfer(transfer.from()+"/"+transfer.fileName(), transfer.to());
                 }
-                if(transfer.to()!=null) {
+                // 只有移动真的成功才改元数据：文件被 Excel/WPS 占用时 transfer 返回失败
+                // 而不是抛异常（避免整条上传报失败），此时文件仍在原目录，若照样把
+                // file_view 指到新路径，报表里点进去就是空的
+                if(transfer.to()!=null && FileTool.isSuccess(moveResult)) {
                     String largeCategory = transfer.to().split("/")[0];
                     LambdaQueryWrapper<Category> cateWrapper = new LambdaQueryWrapper<>();
                     cateWrapper.eq(Category::getName,largeCategory);
