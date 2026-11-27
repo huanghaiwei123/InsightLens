@@ -11,6 +11,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -24,7 +25,8 @@ import java.util.regex.Pattern;
  *   ③ 无 DDL/DML           —— 危险关键词黑名单，覆盖 CTE 与函数调用内的隐藏写法
  *   ④ 必须带 LIMIT          —— 缺失时自动追加 LIMIT 200（格式问题，不算安全拒绝）
  *   ⑤ 表名白名单           —— 可用表清单 + 系统表之外一律拒绝
- *   ⑥ 禁止跨库/外部文件     —— ATTACH 由黑名单覆盖，read_* 表函数单独拦截
+ *   ⑥ 受控读取 Excel        —— ATTACH 由黑名单覆盖；只允许 read_xlsx 且路径必须在
+ *                              SchemaRetrieveNode 下发的白名单内，其他 read_* 一律拒绝
  *   ⑦ 时间口径显式（窄化版）—— 仅当「引用时间字段 && 无时间条件 && 无聚合 && 无 LIMIT」
  *                              四者同时成立才拒绝；其余时间口径问题（如聚合无边界）
  *                              属生成质量问题，交 judge 判 off_target 走修正循环。
@@ -49,8 +51,13 @@ public class SqlGuardNode implements Node {
                     + "|attach|detach|copy|export|import|install|load|call|set|reset"
                     + "|pragma|vacuum|checkpoint)\\b");
 
-    /** DuckDB 读外部文件的表函数：read_csv / read_csv_auto / read_parquet / read_json ... */
+    /**
+     * 唯一放行的读文件表函数：read_xlsx。匹配到后还要把第一个字符串参数（路径）
+     * 与白名单逐一比对，不在名单内一律拒绝——否则模型能 read_xlsx('/etc/passwd')。
+     */
     private static final Pattern READ_FILE_FUNCTIONS = Pattern.compile("\\bread_\\w+\\s*\\(");
+    private static final Pattern READ_XLSX_FUNCTION = Pattern.compile(
+            "\\bread_xlsx\\s*\\(\\s*'((?:[^']|'')*)'", Pattern.CASE_INSENSITIVE);
 
     /** FROM / JOIN 后面跟的表名（正则兜底用，主路径走 JSqlParser） */
     private static final Pattern FROM_OR_JOIN = Pattern.compile(
@@ -100,9 +107,12 @@ public class SqlGuardNode implements Node {
             return;
         }
 
-        // ⑥ 禁止读取外部文件（ATTACH 已被黑名单覆盖）
-        if (READ_FILE_FUNCTIONS.matcher(body).find()) {
-            reject(state, "禁止读取外部文件");
+        // ⑥ 受控读取 Excel（ATTACH 已被黑名单覆盖）：
+        //    在剥壳文本上找表函数名（避免字符串字面量里的 'read_csv(' 误判），
+        //    只允许 read_xlsx，且路径参数必须精确命中本分类下发的白名单。
+        String fileReadReason = checkFileReads(state, sql, body);
+        if (fileReadReason != null) {
+            reject(state, fileReadReason);
             return;
         }
 
@@ -247,6 +257,62 @@ public class SqlGuardNode implements Node {
         Pattern p = Pattern.compile(
                 "(^|[^\\p{L}\\p{N}_])" + Pattern.quote(word) + "($|[^\\p{L}\\p{N}_])");
         return p.matcher(text).find();
+    }
+
+    /**
+     * 规则⑥：只允许 read_xlsx，且每个 read_xlsx 的路径参数必须在白名单内。
+     * 返回 null 表示放行；否则返回拒绝原因。
+     *
+     * 在剥壳后的 norm 上匹配 read_* 函数名（避免字符串字面量里的 'read_csv(' 误判），
+     * 但在原始 sql 上提取路径参数（剥壳会把字符串内容抹掉，路径拿不到）。
+     */
+    private String checkFileReads(AnalysisState state, String rawSql, String strippedBody) {
+        Matcher funcs = READ_FILE_FUNCTIONS.matcher(strippedBody);
+        if (!funcs.find()) {
+            return null;
+        }
+        // 逐个函数名：出现 read_xlsx 以外的读文件函数即拒绝，并统计调用次数
+        int callCount = 0;
+        do {
+            callCount++;
+            String call = funcs.group();
+            if (!call.toLowerCase().startsWith("read_xlsx")) {
+                return "禁止读取外部文件";
+            }
+        } while (funcs.find());
+
+        List<String> allowed = state.getAllowedFilePaths();
+        if (allowed == null || allowed.isEmpty()) {
+            return "禁止读取外部文件：本分类没有可读取的文件";
+        }
+        Set<String> normalized = new HashSet<>();
+        for (String p : allowed) {
+            if (p != null) {
+                normalized.add(normalizePath(p));
+            }
+        }
+
+        // 每个 read_xlsx 调用的第一个字符串参数 = 路径，必须在白名单内
+        Matcher paths = READ_XLSX_FUNCTION.matcher(rawSql);
+        int matched = 0;
+        while (paths.find()) {
+            matched++;
+            String path = paths.group(1).replace("''", "'");
+            if (!normalized.contains(normalizePath(path))) {
+                log.warn("[sql-guard] read_xlsx 路径不在白名单：{}", path);
+                return "禁止读取本分类之外的文件";
+            }
+        }
+        // 每个 read_xlsx( 调用都必须匹配到带引号的路径；少一个就按不安全处理
+        if (matched != callCount) {
+            return "禁止读取外部文件：read_xlsx 路径非法";
+        }
+        return null;
+    }
+
+    /** 路径归一化：统一分隔符、大小写与首尾空白，用于白名单比对（Windows 路径大小写不敏感） */
+    private String normalizePath(String p) {
+        return p == null ? "" : p.trim().replace('\\', '/').toLowerCase();
     }
 
     /**

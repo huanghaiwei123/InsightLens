@@ -1,8 +1,8 @@
 package com.gdou.agent.api.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.gdou.agent.api.common.Result;
-import com.gdou.agent.api.service.MessageService;
+import com.gdou.agent.infra.common.Result;
+import com.gdou.agent.service.MessageService;
 import com.gdou.agent.api.vo.MessageVO;
 import com.gdou.agent.meta.entity.Message;
 import org.junit.jupiter.api.DisplayName;

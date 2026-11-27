@@ -1,7 +1,7 @@
 package com.gdou.agent.api.exception;
 
-import com.gdou.agent.api.constant.CodeConstant;
-import com.gdou.agent.api.constant.MsgConstant;
+import com.gdou.agent.infra.constant.CodeConstant;
+import com.gdou.agent.infra.constant.MsgConstant;
 import org.junit.jupiter.api.DisplayName;
 import org.springframework.http.HttpMethod;
 import org.junit.jupiter.api.Test;

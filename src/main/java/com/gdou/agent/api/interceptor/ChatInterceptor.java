@@ -1,6 +1,6 @@
 package com.gdou.agent.api.interceptor;
 
-import com.gdou.agent.api.holder.SessionHolder;
+import com.gdou.agent.infra.holder.SessionHolder;
 import com.gdou.agent.orchestration.GraphRunner;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -9,7 +9,6 @@ import org.slf4j.MDC;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import java.util.Enumeration;
 import java.util.UUID;
 
 @Slf4j

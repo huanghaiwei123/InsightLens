@@ -2,7 +2,7 @@ package com.gdou.agent.orchestration.node.impl;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.gdou.agent.infra.LlmClient;
+import com.gdou.agent.infra.llm.LlmClient;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
 import com.gdou.agent.orchestration.node.Node;

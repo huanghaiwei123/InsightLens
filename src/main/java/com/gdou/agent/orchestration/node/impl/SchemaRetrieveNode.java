@@ -1,35 +1,40 @@
 package com.gdou.agent.orchestration.node.impl;
 
-import com.gdou.agent.api.holder.SessionHolder;
+import com.gdou.agent.infra.holder.SessionHolder;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
 import com.gdou.agent.orchestration.node.Node;
 import com.gdou.agent.orchestration.node.NodeName;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 /**
  * ② Schema 检索节点
  * 入：当前窗口的 categoryId（SessionHolder）
- * 出：candidateTables（分类下全部可用视图，同时作为下游表名白名单）、tableSchemas（这些视图 + 系统表的列结构）
+ * 出：fileCatalog（本分类可读 Excel 的路径 + sheet + 列结构）、allowedFilePaths（路径白名单）、
+ *     tableSchemas（仅系统表 DDL + 口径注释，供模型查元数据用）
  *
- * 选表机制已废弃：不再由 clarify 模型挑表，这里直接按分类把 file_view 里 status=success 的表全量收集。
- * 表名由此成为「可用表清单」——代表能用哪些表，不代表这次该用哪些表，由 SQL 生成节点自行判断相关性。
+ * 用户 Excel 不注册成 DuckDB 视图，模型直接用 read_xlsx('绝对路径', sheet='...') 读取，
+ * 所以这里要喂给模型「路径 + 真实列名」——只给文件名模型写不出带列的 SQL。
+ * 列结构由 DESCRIBE SELECT * FROM read_xlsx(...) 现场读取，避免使用缓存导致列变更不同步。
  *
- * 用户表都是 DuckDB VIEW（CREATE VIEW ... AS SELECT * FROM read_xlsx(...)），
- * duckdb_tables().sql 拿到的是 CREATE VIEW 定义、不含列名与类型，模型无法据此写 SQL。
- * 因此用户表结构改从 duckdb_columns() 逐列拼成 CREATE TABLE 风格；系统表仍直接取 duckdb_tables().sql。
+ * 安全边界：allowedFilePaths 只放本分类、status=success、非 eval:// 伪路径、且真实存在于
+ * workspace 内的文件；SqlGuardNode 校验 read_xlsx 的路径参数必须是这里面的值，
+ * 所以模型只能读「喂给它的文件」，读不到服务器任意文件。
  *
  * 连接统一走 Spring 数据源（JdbcTemplate → jdbc:duckdb:./data/app.duckdb），
  * 不要再 DriverManager 直连：绕过连接池，且与 Hikari(size=1) 的单写者约定冲突。
@@ -43,8 +48,15 @@ public class SchemaRetrieveNode implements Node {
             "session", "message", "category", "file_view",
             "evaluation_run", "eval_case_result", "trace_span");
 
+    /** eval:// 这类伪协议是评测造数文件，没有真实 Excel，不能喂给模型读 */
+    private static final String PSEUDO_PATH = "^[A-Za-z][A-Za-z0-9+.-]*://.*";
+
     @Autowired
     private JdbcTemplate jdbc;
+
+    /** 上传文件根目录：file_path 相对它存放，read_xlsx 需要绝对路径 */
+    @Value("${agent.workspace}")
+    private String workSpace;
 
     @Override
     public void apply(AnalysisState state, RunContext ctx) {
@@ -52,98 +64,126 @@ public class SchemaRetrieveNode implements Node {
         Integer categoryId = SessionHolder.getCategory();
         log.info("[schema] >>> categoryId={}", categoryId);
 
-        // 选表废弃后无条件按分类全量收集：candidateTables 是「可用表清单」，
-        // 既是本节点取 DDL 的范围，也是 SqlGuardNode 的表名白名单。
-        // 列名用 file_view.orig_name（原始文件名），与 ClarifyNode 展示给模型的候选清单一致。
-        String sql = "select orig_name from file_view where status = 'success'";
-        List<String> names = categoryId == null
-                ? jdbc.queryForList(sql + " order by orig_name", String.class)
-                : jdbc.queryForList(sql + " and category_id = ? order by orig_name", String.class, categoryId);
-        state.setCandidateTables(names);
-        log.info("[schema] 按分类收集可用表 categoryId={}：{}", categoryId, names);
+        Path workspace = Path.of(workSpace).toAbsolutePath().normalize();
 
-        // DDL 取「分类下全部用户视图 + 全部系统表」：系统表不进候选清单但模型可能关联它们，
-        // 不给列信息模型就会凭空捏造字段名
-        List<String> wantTables = new ArrayList<>();
-        Set<String> distinct = new HashSet<>();
-        for (String t : state.getCandidateTables()) {
-            if (t != null && distinct.add(t.toLowerCase())) {
-                wantTables.add(t.toLowerCase());
+        // 只取本分类、解析成功的真实文件；-1（待归类）与 eval:// 伪路径都排除
+        String baseSql = "select orig_name, file_path, sheet_name, row_count from file_view"
+                + " where status = 'success' and category_id <> -1";
+        List<SheetRow> rows = categoryId == null
+                ? jdbc.query(baseSql + " order by orig_name, sheet_name", (rs, n) -> mapRow(rs))
+                : jdbc.query(baseSql + " and category_id = ? order by orig_name, sheet_name",
+                        (rs, n) -> mapRow(rs), categoryId);
+
+        // 拼文件清单与白名单。同一文件路径只 DESCRIBE 一次（多 sheet 各读各的）
+        Set<String> allowed = new LinkedHashSet<>();
+        StringBuilder catalog = new StringBuilder();
+        Set<String> seenSheet = new HashSet<>();
+        for (SheetRow row : rows) {
+            Path abs = resolveRealFile(workspace, row.filePath());
+            if (abs == null) {
+                continue;
             }
-        }
-        List<String> systemNames = new ArrayList<>();
-        for (String t : SYSTEM_TABLES) {
-            if (distinct.add(t)) {
-                wantTables.add(t);
-                systemNames.add(t);
+            String path = abs.toString().replace('\\', '/');
+            String sheet = row.sheetName() == null ? "" : row.sheetName();
+            if (!seenSheet.add(path + "|" + sheet)) {
+                continue;
             }
+            List<String> columns;
+            try {
+                columns = describeColumns(abs, sheet);
+            } catch (Exception e) {
+                // 单个文件读不了（被删、改名、sheet 变更）只跳过它，不影响其他文件
+                log.warn("[schema] 读取 Excel 列结构失败，跳过：file={}, sheet={}, err={}",
+                        path, sheet, e.getMessage());
+                continue;
+            }
+            if (columns.isEmpty()) {
+                log.warn("[schema] Excel 无列结构，跳过：file={}, sheet={}", path, sheet);
+                continue;
+            }
+            allowed.add(path);
+            catalog.append("- 文件：").append(row.origName())
+                    .append("（sheet：").append(sheet).append("，")
+                    .append(row.rowCount() == null ? 0 : row.rowCount()).append(" 行）\n")
+                    .append("  路径：").append(path).append("\n")
+                    .append("  列：").append(String.join(", ", columns)).append("\n");
         }
-        if (wantTables.isEmpty()) {
-            log.warn("[schema] 没有任何要检索的表，跳过 DDL 查询");
-            state.setTableSchemas(null);
-            return;
-        }
+        // 表名白名单只留系统表：用户数据改走 read_xlsx 路径校验，
+        // 不再把 Excel 文件名塞进 candidateTables 让模型误以为是表。
+        state.setCandidateTables(new ArrayList<>(SYSTEM_TABLES));
+        state.setAllowedFilePaths(new ArrayList<>(allowed));
+        String fileCatalog = catalog.toString().trim();
+        state.setFileCatalog(fileCatalog.isEmpty() ? null : fileCatalog);
+        log.info("[schema] 本分类可用文件 sheet 数={}, 去重路径数={}", seenSheet.size(), allowed.size());
 
-        String placeholders = String.join(",", Collections.nCopies(wantTables.size(), "?"));
-
-        // 系统表：duckdb_tables().sql 就是 CREATE TABLE，直接取
-        String sysPlaceholders = String.join(",", Collections.nCopies(systemNames.size(), "?"));
+        // 系统表 DDL 恒带：模型可能关联 file_view 等元数据表，不给列信息会凭空捏造字段
+        String placeholders = String.join(",", Collections.nCopies(SYSTEM_TABLES.size(), "?"));
         List<String> ddlList = jdbc.query(
                 "select sql from duckdb_tables()"
-                        + " where schema_name = 'main' and lower(table_name) in (" + sysPlaceholders + ")",
-                (rs, rowNum) -> rs.getString("sql"), systemNames.toArray());
+                        + " where schema_name = 'main' and lower(table_name) in (" + placeholders + ")",
+                (rs, rowNum) -> rs.getString("sql"), SYSTEM_TABLES.toArray());
 
-        // 用户表是 VIEW：逐列拼成 CREATE TABLE 风格，让模型看到真实列名与类型
-        List<String> userViews = wantTables.stream()
-                .filter(t -> !SYSTEM_TABLES.contains(t)).toList();
-        Map<String, List<String>> columnsByTable = new LinkedHashMap<>();
-        if (!userViews.isEmpty()) {
-            String viewPlaceholders = String.join(",", Collections.nCopies(userViews.size(), "?"));
-            jdbc.query("select lower(table_name) as t, column_name, data_type from duckdb_columns()"
-                            + " where schema_name = 'main' and lower(table_name) in (" + viewPlaceholders + ")"
-                            + " order by table_name, column_index",
-                    rs -> {
-                        columnsByTable.computeIfAbsent(rs.getString("t"), k -> new ArrayList<>())
-                                .add(rs.getString("column_name") + " " + rs.getString("data_type"));
-                    },
-                    userViews.toArray());
-        }
-
-        StringBuilder ddlSb = new StringBuilder();
-        ddlList.stream().filter(Objects::nonNull).forEach(ddl -> ddlSb.append(ddl).append('\n'));
-        columnsByTable.forEach((table, cols) -> ddlSb.append("CREATE TABLE ").append(table)
-                .append("(").append(String.join(", ", cols)).append(");\n"));
-
-        // 口径词典写在视图/表的 COMMENT ON TABLE / COLUMN 里，DuckDB 存进 catalog，
-        // 但 CREATE 语句不带注释。这里补注入，否则模型只看到列名与类型，
-        // 不知道 status 枚举、GMV / 退款率口径、时间边界。
-        // 只取本批命中的表：全库注释一起塞会稀释提示词。
-        String businessOnly = " and lower(table_name) in (" + placeholders + ")";
+        // 口径词典写在 COMMENT ON 里，CREATE 语句不带；补注入给模型（只取系统表）
         List<String> tableComments = jdbc.query(
                 "select '-- 表注释 ' || table_name || '：' || comment from duckdb_tables()"
                         + " where schema_name = 'main' and comment is not null and comment <> ''"
-                        + businessOnly,
-                (rs, rowNum) -> rs.getString(1).replace("\n", " "), wantTables.toArray());
+                        + " and lower(table_name) in (" + placeholders + ")",
+                (rs, rowNum) -> rs.getString(1).replace("\n", " "), SYSTEM_TABLES.toArray());
         List<String> columnComments = jdbc.query(
                 "select '-- 列注释 ' || table_name || '.' || column_name || '：' || comment from duckdb_columns()"
                         + " where schema_name = 'main' and comment is not null and comment <> ''"
-                        + businessOnly
+                        + " and lower(table_name) in (" + placeholders + ")"
                         + " order by table_name, column_index",
-                (rs, rowNum) -> rs.getString(1).replace("\n", " "), wantTables.toArray());
+                (rs, rowNum) -> rs.getString(1).replace("\n", " "), SYSTEM_TABLES.toArray());
 
-        StringBuilder sb = new StringBuilder(ddlSb.toString().trim());
+        StringBuilder sb = new StringBuilder();
+        ddlList.stream().filter(Objects::nonNull).forEach(ddl -> sb.append(ddl).append('\n'));
         if (!tableComments.isEmpty() || !columnComments.isEmpty()) {
-            sb.append("\n\n-- 库内登记的业务口径（COMMENT ON TABLE / COLUMN），与表结构同等权威：\n");
+            sb.append("\n-- 库内登记的业务口径（COMMENT ON TABLE / COLUMN），与表结构同等权威：\n");
             tableComments.forEach(line -> sb.append(line).append('\n'));
             columnComments.forEach(line -> sb.append(line).append('\n'));
         }
         String tableSchemas = sb.toString().trim();
         state.setTableSchemas(tableSchemas.isEmpty() ? null : tableSchemas);
-        if (ddlSb.length() == 0) {
-            log.warn("[schema] 未取到任何列结构，后续 SQL 生成将缺少表结构；wantTables={}", wantTables);
+        if (fileCatalog.isEmpty()) {
+            log.warn("[schema] 本分类没有可读的真实文件，模型只能查系统表；categoryId={}", categoryId);
         }
-        log.info("[schema] <<< cost={}ms, 请求表数={}, 视图数={}, 口径注释行数={}, tableSchemas 字符数={}",
-                System.currentTimeMillis() - start, wantTables.size(), columnsByTable.size(),
-                tableComments.size() + columnComments.size(), tableSchemas.length());
+        log.info("[schema] <<< cost={}ms, 系统表数={}, tableSchemas 字符数={}, fileCatalog 字符数={}",
+                System.currentTimeMillis() - start, ddlList.size(), tableSchemas.length(), fileCatalog.length());
     }
+
+    /** 把 file_path 解析成 workspace 内真实存在的绝对路径；伪路径/越界/不存在都返回 null */
+    private Path resolveRealFile(Path workspace, String filePath) {
+        if (filePath == null || filePath.isBlank() || filePath.matches(PSEUDO_PATH)) {
+            return null;
+        }
+        try {
+            Path p = Path.of(filePath);
+            Path abs = (p.isAbsolute() ? p : workspace.resolve(p)).normalize();
+            if (!abs.startsWith(workspace) || !Files.isRegularFile(abs)) {
+                return null;
+            }
+            return abs;
+        } catch (InvalidPathException e) {
+            return null;
+        }
+    }
+
+    /** 用 DESCRIBE 现场读列结构，避免缓存；sheet 为空时读第一个工作表 */
+    private List<String> describeColumns(Path abs, String sheet) {
+        String pathLiteral = abs.toString().replace('\\', '/').replace("'", "''");
+        String from = sheet.isEmpty()
+                ? "read_xlsx('" + pathLiteral + "')"
+                : "read_xlsx('" + pathLiteral + "', sheet = '"
+                        + sheet.replace("'", "''") + "')";
+        return jdbc.query("DESCRIBE SELECT * FROM " + from,
+                (rs, n) -> rs.getString("column_name") + " " + rs.getString("column_type"));
+    }
+
+    private SheetRow mapRow(java.sql.ResultSet rs) throws java.sql.SQLException {
+        return new SheetRow(rs.getString("orig_name"), rs.getString("file_path"),
+                rs.getString("sheet_name"), rs.getLong("row_count"));
+    }
+
+    private record SheetRow(String origName, String filePath, String sheetName, Long rowCount) {}
 }

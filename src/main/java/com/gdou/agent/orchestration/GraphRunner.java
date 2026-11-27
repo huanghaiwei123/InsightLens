@@ -1,7 +1,7 @@
 package com.gdou.agent.orchestration;
 
-import com.gdou.agent.api.holder.SessionHolder;
-import com.gdou.agent.infra.TraceRecorder;
+import com.gdou.agent.infra.holder.SessionHolder;
+import com.gdou.agent.infra.llm.TraceRecorder;
 import com.gdou.agent.orchestration.node.Node;
 import com.gdou.agent.orchestration.node.NodeName;
 import lombok.extern.slf4j.Slf4j;

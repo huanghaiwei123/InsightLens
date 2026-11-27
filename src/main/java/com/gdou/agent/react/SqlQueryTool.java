@@ -2,7 +2,7 @@ package com.gdou.agent.react;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.gdou.agent.api.holder.SessionHolder;
+import com.gdou.agent.infra.holder.SessionHolder;
 import com.gdou.agent.orchestration.GraphRunner;
 import com.gdou.agent.orchestration.RunContext;
 import org.springframework.ai.tool.annotation.Tool;

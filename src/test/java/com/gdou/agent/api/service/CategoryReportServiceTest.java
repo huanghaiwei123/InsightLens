@@ -1,7 +1,9 @@
 package com.gdou.agent.api.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.gdou.agent.api.service.impl.CategoryReportServiceImpl;
+import com.gdou.agent.service.CategoryService;
+import com.gdou.agent.service.FileViewService;
+import com.gdou.agent.service.impl.CategoryReportServiceImpl;
 import com.gdou.agent.api.vo.CategoryReportVO;
 import com.gdou.agent.meta.entity.Category;
 import com.gdou.agent.meta.entity.FileView;
@@ -98,8 +100,8 @@ class CategoryReportServiceTest {
     }
 
     @Test
-    @DisplayName("待归类文件的 category_id=-1 进「未分类」，不丢失也不混进真实分类")
-    void pendingFileGoesToOrphan() {
+    @DisplayName("待归类文件的 category_id=-1 不进报表，不生成「未分类」节点")
+    void pendingFileStaysOutOfReport() {
         CategoryService categoryService = mock(CategoryService.class);
         FileViewService fileViewService = mock(FileViewService.class);
         when(categoryService.list(any(LambdaQueryWrapper.class))).thenReturn(List.of(
@@ -117,10 +119,10 @@ class CategoryReportServiceTest {
 
         List<CategoryReportVO> report = service.buildReport();
 
-        // 真实空分类仍保留；待归类文件落到末尾的「未分类」节点
+        // 真实空分类仍保留；待归类文件不展示，归类成功后会自然出现在对应分类
         assertThat(report).extracting(CategoryReportVO::getName)
-                .containsExactly("销售数据", "未分类");
-        assertThat(report.get(1).getFileCount()).isEqualTo(1);
+                .containsExactly("销售数据");
+        assertThat(report.get(0).getFileCount()).isZero();
     }
 
     private static FileView view(Integer id, String uploadId, String origName,

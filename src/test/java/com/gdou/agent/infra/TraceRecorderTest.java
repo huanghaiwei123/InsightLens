@@ -1,7 +1,8 @@
 package com.gdou.agent.infra;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.gdou.agent.api.service.TraceSpanService;
+import com.gdou.agent.infra.llm.TraceRecorder;
+import com.gdou.agent.service.TraceSpanService;
 import com.gdou.agent.meta.entity.TraceSpan;
 import com.gdou.agent.orchestration.node.NodeName;
 import org.junit.jupiter.api.BeforeEach;

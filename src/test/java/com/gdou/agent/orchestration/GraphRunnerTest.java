@@ -3,7 +3,7 @@ package com.gdou.agent.orchestration;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
-import com.gdou.agent.infra.TraceRecorder;
+import com.gdou.agent.infra.llm.TraceRecorder;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.orchestration.node.Node;
 import com.gdou.agent.orchestration.node.NodeName;

@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gdou.agent.api.exception.BusinessException;
-import com.gdou.agent.infra.LlmClient;
+import com.gdou.agent.infra.llm.LlmClient;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
 import com.gdou.agent.orchestration.node.Node;
@@ -23,8 +23,8 @@ import java.util.List;
 
 /**
  * ③ SQL 生成节点
- * 入：clarifiedQuestion、candidateTables（schema 节点按分类全量收集的可用表清单）、
- *     tableSchemas、assumptions、上一轮 error（修正循环时）
+ * 入：clarifiedQuestion、fileCatalog（本分类可读 Excel 的路径 + sheet + 列结构）、
+ *     tableSchemas（系统表 DDL）、assumptions、上一轮 error（修正循环时）
  * 出：sql、sqlExplain
  */
 @Slf4j
@@ -73,12 +73,15 @@ public class SqlGenerateNode implements Node {
      */
     private String buildUserMessage(AnalysisState state) {
         StringBuilder sb = new StringBuilder();
-        sb.append("可用表清单：").append(state.getCandidateTables()).append('\n');
+        sb.append("可读文件清单（只能用这里的路径 + sheet 读，路径必须逐字复制）：\n")
+                .append(state.getFileCatalog() == null ? "（本分类暂无可读文件）" : state.getFileCatalog())
+                .append('\n');
+        sb.append("系统表清单：").append(state.getCandidateTables()).append('\n');
         sb.append("澄清后的问题：").append(state.getClarifiedQuestion()).append('\n');
         sb.append("口径假设：").append(
                 state.getAssumptions() == null ? "无" : String.join("；", state.getAssumptions()))
                 .append('\n');
-        sb.append("表结构：\n").append(state.getTableSchemas()).append('\n');
+        sb.append("系统表结构与口径：\n").append(state.getTableSchemas()).append('\n');
         if (state.getRetryCount() != null && state.getRetryCount() > 0 && state.getError() != null) {
             sb.append("上一轮生成的 SQL：").append(state.getSql()).append('\n');
             sb.append("上一轮的问题：").append(state.getError()).append('\n');

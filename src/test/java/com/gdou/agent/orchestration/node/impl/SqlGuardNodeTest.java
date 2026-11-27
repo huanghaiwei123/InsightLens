@@ -111,13 +111,60 @@ class SqlGuardNodeTest {
         assertReject("包含禁止的关键词");
     }
 
-    // ---------- ⑥ 外部文件 ----------
+    // ---------- ⑥ 受控读取 Excel ----------
 
     @Test
-    @DisplayName("⑥ read_* 表函数读外部文件一律拒绝")
+    @DisplayName("⑥ read_csv_auto 等其他读文件函数一律拒绝")
     void rejectExternalFileRead() {
         check("select * from read_csv_auto('/etc/passwd')");
         assertReject("禁止读取外部文件");
+    }
+
+    @Test
+    @DisplayName("⑥ 白名单内的 read_xlsx 放行")
+    void allowWhitelistedXlsx() {
+        state.setAllowedFilePaths(List.of("D:/InsightLens/data/excel/会员运营/充值.xlsx"));
+        check("select 会员ID, 充值金额 from read_xlsx('D:/InsightLens/data/excel/会员运营/充值.xlsx', sheet = '充值') limit 10");
+        assertPass();
+    }
+
+    @Test
+    @DisplayName("⑥ 路径大小写与反斜杠不影响白名单比对")
+    void allowXlsxPathNormalized() {
+        state.setAllowedFilePaths(List.of("D:/InsightLens/data/excel/充值.xlsx"));
+        check("select 充值金额 from read_xlsx('d:\\InsightLens\\data\\excel\\充值.xlsx', sheet = '充值') limit 10");
+        assertPass();
+    }
+
+    @Test
+    @DisplayName("⑥ read_xlsx 读白名单外的文件拒绝，防止读服务器任意文件")
+    void rejectXlsxOutsideWhitelist() {
+        state.setAllowedFilePaths(List.of("D:/InsightLens/data/excel/充值.xlsx"));
+        check("select * from read_xlsx('/etc/passwd', sheet = 'x') limit 10");
+        assertReject("禁止读取本分类之外的文件");
+    }
+
+    @Test
+    @DisplayName("⑥ 没有下发白名单时 read_xlsx 一律拒绝")
+    void rejectXlsxWhenNoWhitelist() {
+        check("select 充值金额 from read_xlsx('D:/data/充值.xlsx', sheet = '充值') limit 10");
+        assertReject("禁止读取外部文件");
+    }
+
+    @Test
+    @DisplayName("⑥ read_xlsx 路径用占位符而非字符串字面量时拒绝")
+    void rejectXlsxWithNonLiteralPath() {
+        state.setAllowedFilePaths(List.of("D:/data/充值.xlsx"));
+        check("select 充值金额 from read_xlsx(?, sheet = '充值') limit 10");
+        assertReject("read_xlsx 路径非法");
+    }
+
+    @Test
+    @DisplayName("⑥ 字符串字面量里出现 read_csv 字样不误判")
+    void ignoreReadFunctionNameInsideLiteral() {
+        state.setAllowedFilePaths(List.of("D:/data/充值.xlsx"));
+        check("select 充值金额 from read_xlsx('D:/data/充值.xlsx', sheet = '充值') where note = 'read_csv(' limit 10");
+        assertPass();
     }
 
     // ---------- ⑤ 表名白名单 ----------

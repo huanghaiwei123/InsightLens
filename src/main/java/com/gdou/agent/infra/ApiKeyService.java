@@ -1,6 +1,6 @@
 package com.gdou.agent.infra;
 
-import com.gdou.agent.api.constant.CodeConstant;
+import com.gdou.agent.infra.constant.CodeConstant;
 import com.gdou.agent.api.exception.BusinessException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;

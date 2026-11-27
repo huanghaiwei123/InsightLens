@@ -4,8 +4,8 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.gdou.agent.api.holder.SessionHolder;
-import com.gdou.agent.infra.LlmClient;
+import com.gdou.agent.infra.holder.SessionHolder;
+import com.gdou.agent.infra.llm.LlmClient;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
 import com.gdou.agent.orchestration.node.Node;
@@ -59,8 +59,6 @@ public class ClarifyNode implements Node {
         String baseDate = (evalBaseDate == null || evalBaseDate.isBlank())
                 ? LocalDate.now(ZoneId.of("Asia/Shanghai")).toString() : evalBaseDate.trim();
         String systemMessage = prompt("message/ClarifyNode.txt")
-                + "\n\n## 当前日期与时区\n今天是 " + baseDate + "。系统默认时区为北京时间（Asia/Shanghai, UTC+8），"
-                + "用户未指明时区的时间问题一律按北京时间理解。"
                 + "\n问题里的「今天 / 上周 / 近 30 天 / 今年」等相对时间，一律以该日期为基准换算成具体起止日期，"
                 + "并写进 clarified_question 与 assumptions 两处。";
         // 口径词典只存在库表注释里，澄清阶段看不到它就会自行猜指标算法并写进 assumptions，
@@ -75,7 +73,7 @@ public class ClarifyNode implements Node {
         }
         String tables = tableList();
         // 标题与 ClarifyNode.txt 的「1. 输入」逐字对齐，第三列是行数不是列定义
-        String userMessage = question + "\n\n候选表清单（文件名 | sheet 名 | 行数）：\n" + tables;
+        String userMessage = question + "\n\n候选文件清单（文件名 | sheet 名 | 行数）：\n" + tables;
         List<Message> messages = List.of(
                 new SystemMessage(systemMessage),
                 new UserMessage(userMessage));
@@ -110,9 +108,9 @@ public class ClarifyNode implements Node {
     }
 
     /**
-     * 从 file_view 拼候选表清单，一行一个 sheet：orig_name | sheet_name | row_count。
+     * 从 file_view 拼候选文件清单，一行一个 sheet：orig_name | sheet_name | row_count。
      * 按本窗口绑定的 category_id 过滤实现大分类隔离；categoryId 为空时不加过滤（窗口未绑定分类）。
-     * 这里只做候选呈现，真实视图名由 schema_retrieve 阶段从 file_view 取；建 VIEW 由上传链路负责。
+     * 这里只做候选呈现，便于澄清指代；真实文件路径与列结构由 schema_retrieve 阶段给出。
      */
     private String tableList() {
         Integer categoryId = SessionHolder.getCategory();

@@ -1,7 +1,7 @@
 package com.gdou.agent.orchestration.node.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.gdou.agent.infra.LlmClient;
+import com.gdou.agent.infra.llm.LlmClient;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
@@ -92,7 +92,7 @@ class ClarifyNodeTest {
     }
 
     @Test
-    @DisplayName("候选表清单按「原始文件名 | sheet 名 | 行数」三列拼进用户消息")
+    @DisplayName("候选文件清单按「原始文件名 | sheet 名 | 行数」三列拼进用户消息")
     void tableListFormat() {
         when(llmClient.call(anyList())).thenReturn(
                 "{\"clarified_question\":\"平均分\",\"assumptions\":[],\"need_clarify\":false,"
@@ -101,7 +101,7 @@ class ClarifyNodeTest {
         node.apply(state, CTX);
 
         String user = userMessage();
-        assertThat(user).contains("候选表清单（文件名 | sheet 名 | 行数）")
+        assertThat(user).contains("候选文件清单（文件名 | sheet 名 | 行数）")
                 .contains("成绩汇总_2026.xlsx | 春季期中数学 | 42")
                 .contains("成绩汇总_2026.xlsx | 春季期中语文 | 42")
                 .startsWith("这次平均分怎么样");

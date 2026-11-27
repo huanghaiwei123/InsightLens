@@ -2,7 +2,7 @@ package com.gdou.agent.orchestration.node.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gdou.agent.api.exception.BusinessException;
-import com.gdou.agent.infra.LlmClient;
+import com.gdou.agent.infra.llm.LlmClient;
 import com.gdou.agent.infra.stream.NoOpStreamSink;
 import com.gdou.agent.orchestration.AnalysisState;
 import com.gdou.agent.orchestration.RunContext;
@@ -47,6 +47,7 @@ class SqlGenerateNodeTest {
         state.setClarifiedQuestion("上周各品类退款率");
         state.setCandidateTables(List.of("sales"));
         state.setTableSchemas("CREATE TABLE sales(category VARCHAR, amount DOUBLE);");
+        state.setFileCatalog("- 文件：会员.xlsx（sheet：会员，20 行）\n  路径：D:/data/会员.xlsx\n  列：会员ID VARCHAR, 会员等级 VARCHAR");
     }
 
     private String userMessage() {
@@ -66,7 +67,8 @@ class SqlGenerateNodeTest {
 
         assertThat(state.getSql()).isEqualTo("select category from sales limit 10");
         assertThat(state.getSqlExplain()).isEqualTo("按品类查销量");
-        assertThat(userMessage()).contains("澄清后的问题：上周各品类退款率", "可用表清单：[sales]");
+        assertThat(userMessage()).contains("澄清后的问题：上周各品类退款率", "系统表清单：[sales]")
+                .contains("可读文件清单").contains("D:/data/会员.xlsx");
     }
 
     @Test

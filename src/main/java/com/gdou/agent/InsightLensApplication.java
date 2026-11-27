@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 @SpringBootApplication
-@MapperScan("com.gdou.agent.api.mapper")
+@MapperScan("com.gdou.agent.mapper")
 @EnableTransactionManagement
 public class InsightLensApplication {
 

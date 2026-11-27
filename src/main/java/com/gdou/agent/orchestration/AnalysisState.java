@@ -33,6 +33,18 @@ public class AnalysisState implements Serializable {
     /** 命中表的 DDL + 字段注释，拼进提示词 */
     private String tableSchemas;
 
+    /**
+     * 本分类下允许模型读取的 Excel 清单（路径 + sheet + 列结构），拼进 SQL 生成提示词。
+     * 路径是「相对 workspace 的 file_path → 绝对路径」规范化后的正斜杠形式。
+     */
+    private String fileCatalog;
+
+    /**
+     * 与 fileCatalog 对应的绝对路径白名单，SqlGuardNode 校验 read_xlsx 的第一个参数。
+     * 只放本分类、status=success、非 eval:// 伪路径的真实文件，模型读清单外的文件一律拒绝。
+     */
+    private java.util.List<String> allowedFilePaths;
+
     /** 当前生成的 SQL */
     private String sql;
 

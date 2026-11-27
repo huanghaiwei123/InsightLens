@@ -2,6 +2,8 @@ package com.gdou.agent.api.tools;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
+import com.gdou.agent.infra.tools.FileAction;
+import com.gdou.agent.infra.tools.FileTransfer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

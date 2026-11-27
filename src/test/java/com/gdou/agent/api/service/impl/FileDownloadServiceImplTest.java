@@ -1,10 +1,12 @@
 package com.gdou.agent.api.service.impl;
 
 import com.gdou.agent.api.exception.BusinessException;
-import com.gdou.agent.api.service.FileDownloadService;
+import com.gdou.agent.infra.constant.CodeConstant;
+import com.gdou.agent.service.FileDownloadService;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
-import com.gdou.agent.api.service.FileViewService;
+import com.gdou.agent.service.FileViewService;
 import com.gdou.agent.meta.entity.FileView;
+import com.gdou.agent.service.impl.FileDownloadServiceImpl;
 import org.mockito.ArgumentMatchers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -86,7 +88,7 @@ class FileDownloadServiceImplTest {
         assertThatThrownBy(() -> service.resolve("eval_seed"))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("评测数据")
-                .hasFieldOrPropertyWithValue("code", com.gdou.agent.api.constant.CodeConstant.CALL_ERROR);
+                .hasFieldOrPropertyWithValue("code", CodeConstant.CALL_ERROR);
     }
 
     @Test
