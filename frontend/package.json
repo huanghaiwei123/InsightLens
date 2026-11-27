@@ -1,7 +1,7 @@
 {
   "name": "insightlens-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "InsightLens 桌面客户端：Excel 上传建库 + 自然语言问数",
   "author": "huanghaiwei",
   "type": "module",
