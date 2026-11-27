@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.ToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.ai.chat.messages.Message;
 import reactor.core.publisher.Flux;
@@ -42,6 +43,13 @@ public class ReActAgentRunner {
     @Autowired(required = false)
     private ToolCallbackProvider mcpTools;
 
+    /**
+     * 联网开关本身的值（不是 spring.ai.mcp.client.enabled —— 守卫可能在启动时把它压成 false）。
+     * 用来区分「本来就没启用」和「启用了却拿不到工具」，两种情况的提示词措辞必须不同。
+     */
+    @Value("${insightlens.mcp.enabled:false}")
+    private boolean mcpEnabled;
+
     @Autowired
     private GraphRunner runner;
 
@@ -63,8 +71,9 @@ public class ReActAgentRunner {
         if (searchTools.length == 0) {
             log.warn("[react] 无可用联网搜索工具，本轮仅使用本地工具");
         }
-        // 提示词必须按「本轮实际挂上的工具」描述能力：MCP 关闭时模型手里没有任何搜索工具，
-        // 若仍告诉它可以联网，它只会回一句「联网工具无法使用」，用户看到会以为程序坏了。
+        // 提示词必须按「本轮实际挂上的工具」描述能力，并且要区分两种「没有工具」：
+        //   insightlens.mcp.enabled=false —— 本来就没启用，说成「故障」会让用户以为程序坏了
+        //   enabled=true 却没挂上       —— 开关开着却拿不到工具，这才是真正的工具故障
         boolean hasSearch = searchTools.length > 0;
         String searchCapability = hasSearch
                 ? "- 联网搜索工具（" + Arrays.stream(searchTools)
@@ -72,8 +81,12 @@ public class ReActAgentRunner {
                         .collect(Collectors.joining("、"))
                         + "）：检索表格之外的外部信息与公开资料。表格内已有的数据优先用 query，"
                         + "不要用联网搜索代替查询。"
-                : "- 本轮没有联网搜索工具。只回答已上传表格范围内的问题：用户要求查外部信息时，"
-                        + "据实说明当前无法联网检索；不要声称正在或已经联网，也不要编造外部资料。";
+                : mcpEnabled
+                        ? "- 联网工具本轮故障：开关已打开，但搜索工具没有挂载成功。"
+                                + "用户要求查外部信息时，据实说明联网检索本轮不可用，"
+                                + "不要声称正在或已经联网，也不要编造外部资料。"
+                        : "- 本轮未启用联网检索：只回答已上传表格范围内的问题。用户要求查外部信息时，"
+                                + "说明现在只能查已上传的数据，不要声称正在或已经联网，也不要编造外部资料。";
         String toolCoop = hasSearch
                 ? "- 问题同时涉及本地数据与外部信息时，先用 query 查本地数据，再按需联网检索，最后综合回答。"
                 : "- 用户问到已上传表格之外的内容时，说明缺哪份数据、需要上传什么，不要用推测代替。";
