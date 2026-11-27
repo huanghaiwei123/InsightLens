@@ -355,15 +355,27 @@
 .kb-graph-bar-row {
   display: flex; align-items: center; gap: 16px;
 }
+.kb-bar-bottom {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-top: 10px;
+}
+.kb-drag-hint {
+  flex: 0 0 auto; font-size: 11px; color: var(--t3); letter-spacing: .02em;
+}
 .kb-graph-title { display: flex; flex-direction: column; flex: 0 0 auto; }
 .kb-graph-title h1 { margin: 4px 0 0; font-size: 22px; line-height: 1.2; font-weight: 700; color: var(--title); }
 
-/* 画布世界：节点 + 连线，整体缩放 */
+/* 画布世界：节点 + 连线，整体平移/缩放。拖拽时去掉过渡才跟手 */
 .kb-world {
   position: absolute; inset: 0;
   transform-origin: 50% 40%;
   transition: transform .25s ease;
+  will-change: transform;
 }
+.kb-world.dragging { transition: none; }
+.kb-canvas { cursor: grab; }
+.kb-canvas.dragging { cursor: grabbing; }
+.kb-canvas.dragging .kb-node { pointer-events: none; }
 .kb-edges {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
@@ -377,6 +389,7 @@
   stroke-dasharray: 5 5;
   opacity: .9;
 }
+.kb-edge-anchor { fill: var(--accent); opacity: .55; }
 
 /* 通用节点：轻微漂浮，各有错峰延迟 */
 .kb-node {
@@ -444,6 +457,7 @@
 .kb-chat-entry:hover { background: var(--accent); color: #fff; transform: translateX(2px); }
 .kb-layer-arrow { color: inherit; font-weight: 700; }
 .kb-chat-entry:hover .kb-layer-arrow { color: #fff; }
+.kb-enter-hint { color: var(--accent); font-weight: 600; }
 
 /* 文件节点 */
 .kb-fnode {
