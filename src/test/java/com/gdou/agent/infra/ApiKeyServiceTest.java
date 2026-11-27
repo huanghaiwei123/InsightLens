@@ -104,4 +104,15 @@ class ApiKeyServiceTest {
         assertThat(ApiKeyService.mask("short")).isEqualTo("s****");
         assertThat(ApiKeyService.mask("")).isEqualTo("（未配置）");
     }
+
+    @Test
+    @DisplayName("安装包模板里的占位 Key 必须当成未配置")
+    void treatsTemplatePlaceholderAsMissing() {
+        // 占位值的作用只是骗过 OpenAI 自动装配的 Assert，不能让它显示成「已配置」
+        assertThat(ApiKeyService.withoutPlaceholder(ApiKeyService.PLACEHOLDER_KEY)).isEmpty();
+        assertThat(ApiKeyService.withoutPlaceholder(" " + ApiKeyService.PLACEHOLDER_KEY + " ")).isEmpty();
+        assertThat(ApiKeyService.withoutPlaceholder(null)).isEmpty();
+        assertThat(ApiKeyService.withoutPlaceholder("sk-real-key-0123456789"))
+                .isEqualTo("sk-real-key-0123456789");
+    }
 }

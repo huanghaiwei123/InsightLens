@@ -1,0 +1,29 @@
+# ============================================================
+# 配置模板：安装包内会以此文件代替 application-local.yaml 分发
+#
+# 打包时（package.json 的 extraResources）把本文件复制为安装目录下的
+# resources/application-local.yaml，首次启动由 Electron 复制到用户数据目录：
+#   Windows: %APPDATA%\insightlens-frontend\application-local.yaml
+# 用户之后在「设置 → 主模型」里填 Key，会直接改写那份副本。
+#
+# 所以这里**只能放空值或占位**，任何真实密钥写进来都会随安装包公开分发。
+# 本地开发请用仓库根目录的 application-local.yaml（已被 .gitignore 忽略）。
+#
+# 本文件的优先级高于 jar 内 application.yaml，所以这里写的 model / base-url
+# 就是用户首次装好后看到的值。想换服务商就改这三行。
+# ============================================================
+spring:
+  ai:
+    openai:
+      # 必须留一个非空占位值：OpenAI 自动装配在 key 为空时会 Assert 失败，整个上下文起不来。
+      # ApiKeyService 认得这个占位值并视为「未配置」，设置页显示「未配置」，
+      # 用户填完真实 Key 后这一行会被原地替换。不要改成空字符串。
+      api-key: "sk-please-set-in-settings"
+      # 换成中转站时改这里，不要带 /v1（Spring AI 自己拼 /v1/chat/completions）
+      base-url: https://api.openai.com
+      chat:
+        options:
+          # 与上面的 base-url 要匹配：官方域名下应填 gpt-4o / gpt-4o-mini 这类存在的模型名
+          model: gpt-4o-mini
+    deepseek:
+      api-key: ""

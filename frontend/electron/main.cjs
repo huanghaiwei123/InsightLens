@@ -63,8 +63,11 @@ function home() {
 /**
  * 首启准备：
  * 1. 建 data/excel 目录 —— DuckDB 要 data 存在，agent.workspace 指向 data/excel
- * 2. 把项目根目录的 application-local.yaml 复制到 userData —— 后端用 insightlens.home
+ * 2. 把 application-local.yaml 复制到 userData —— 后端用 insightlens.home
  *    找配置，userData 里没有就直接启动失败（application.yaml 的 import 没写 optional）
+ *    打包态的来源是安装目录 resources/application-local.yaml，它由
+ *    application-local.example.yaml（空 Key 模板）打包而来，绝不能改成真实的本地配置，
+ *    否则用户密钥会随安装包公开分发。
  * 已存在的文件不覆盖，避免抹掉用户改过的密钥。
  */
 function prepareHome() {
@@ -79,7 +82,9 @@ function prepareHome() {
     if (!fs.existsSync(src)) {
       dialog.showErrorBox(
         '缺少密钥配置',
-        `找不到 ${src}\n\n首次启动需要把项目根目录的 application-local.yaml 复制到用户数据目录：\n${h}`
+        app.isPackaged
+          ? `安装包不完整：找不到 ${src}\n请重新安装 InsightLens。`
+          : `找不到 ${src}\n开发态请把 application-local.example.yaml 复制为 application-local.yaml 并填入 Key。`
       )
       return false
     }

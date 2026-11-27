@@ -71,6 +71,16 @@ public class ApiKeyService {
     /** 写入 application-local.yaml 的「当前主模型」键，重启后据此恢复。 */
     static final String PROVIDER_PATH = "insightlens.llm.provider";
 
+    /**
+     * 安装包模板（application-local.example.yaml）里的占位 Key。
+     *
+     * 为什么需要它：OpenAI 的自动装配在 api-key 为空时直接 Assert 失败，整个 ApplicationContext
+     * 起不来 —— 而全新安装的用户本来就没有 Key。因此模板里放一个非空占位值让上下文能起来，
+     * 再在这里把它识别成「未配置」，设置页显示「未配置」、切过去会被拒绝。
+     * 用户填了真实 Key 后，配置文件里这一行会被原地替换，不会留下占位值。
+     */
+    static final String PLACEHOLDER_KEY = "sk-please-set-in-settings";
+
     private record Level(int indent, String name) {
     }
 
@@ -112,7 +122,7 @@ public class ApiKeyService {
         this.configPath = Path.of(home, "application-local.yaml");
 
         for (LlmProvider provider : LlmProvider.values()) {
-            String key = readProperty(env, provider.apiKeyPath(), "");
+            String key = withoutPlaceholder(readProperty(env, provider.apiKeyPath(), ""));
             if (hasText(key)) keys.put(provider.id(), key);
             baseUrls.put(provider.id(), readProperty(env, provider.baseUrlPath(), defaultBaseUrl(provider)));
             modelNames.put(provider.id(), readProperty(env, provider.modelPath(), defaultModel(provider)));
@@ -145,8 +155,12 @@ public class ApiKeyService {
         }
     }
 
-    private static String defaultBaseUrl(LlmProvider provider) {
-        return provider == LlmProvider.DEEPSEEK ? "https://api.deepseek.com" : "";
+    /** 把模板占位值折成空串，让「未配置」的判断对用户和内部都只有一种语义。 */
+    static String withoutPlaceholder(String key) {
+        return key == null || PLACEHOLDER_KEY.equals(key.trim()) ? "" : key;
+    }
+
+    private static String defaultBaseUrl(LlmProvider provider) {        return provider == LlmProvider.DEEPSEEK ? "https://api.deepseek.com" : "";
     }
 
     private static String defaultModel(LlmProvider provider) {
