@@ -61,24 +61,14 @@ public class ClarifyNode implements Node {
         String systemMessage = prompt("message/ClarifyNode.txt")
                 + "\n问题里的「今天 / 上周 / 近 30 天 / 今年」等相对时间，一律以该日期为基准换算成具体起止日期，"
                 + "并写进 clarified_question 与 assumptions 两处。";
-        // 口径词典只存在库表注释里，澄清阶段看不到它就会自行猜指标算法并写进 assumptions，
-        // 生成阶段再忠实执行错误假设。这里把词典注入 systemMessage 并声明其优先级高于推断。
-        String glossary = businessGlossary();
-        if (!glossary.isEmpty()) {
-            systemMessage += "\n\n## 库内口径词典（最高优先级，先读再补全）\n" + glossary
-                    + "\n\n使用规则：\n"
-                    + "- 词典已定义的指标算法、分母范围、状态枚举、时间字段与时间边界必须逐字沿用，"
-                    + "不得自行改写，也不得就这些项向用户追问；把实际采用的定义逐条写进 assumptions。\n"
-                    + "- 词典未定义的项才由你推断；相对时间换算结果若与词典边界不一致，以词典为准。";
-        }
         String tables = tableList();
         // 标题与 ClarifyNode.txt 的「1. 输入」逐字对齐，第三列是行数不是列定义
         String userMessage = question + "\n\n候选文件清单（文件名 | sheet 名 | 行数）：\n" + tables;
         List<Message> messages = List.of(
                 new SystemMessage(systemMessage),
                 new UserMessage(userMessage));
-        log.info("[clarify] >>> baseDate={}, glossaryChars={}, question={}, categoryId={}, 候选表行数={}",
-                baseDate, glossary.length(), question, SessionHolder.getCategory(), tables.lines().count());
+        log.info("[clarify] >>> baseDate={}, question={}, categoryId={}, 候选表行数={}",
+                baseDate, question, SessionHolder.getCategory(), tables.lines().count());
 
         String raw = LlmClient.call(messages);
         log.debug("[clarify] 模型返回原文：{}", raw);
@@ -89,22 +79,6 @@ public class ClarifyNode implements Node {
         log.info("[clarify] <<< cost={}ms, needClarify={}, clarifiedQuestion={}, assumptions={}, questionToUser={}",
                 end - start, state.getNeedClarify(), state.getClarifiedQuestion(),
                 Arrays.toString(state.getAssumptions()), state.getQuestionToUser());
-    }
-
-    /**
-     * 读取业务表的表注释（口径词典写在 COMMENT ON TABLE 里）注入澄清阶段。
-     * 注入全部业务表；系统表注释对业务口径无帮助，排除。
-     * 换行压成空格，避免把一条定义拆成多行稀释提示词。
-     */
-    private String businessGlossary() {
-        String sql = "select '-- ' || table_name || '：' || replace(comment, chr(10), ' ')"
-                + " from duckdb_tables()"
-                + " where schema_name = 'main' and comment is not null and comment <> ''"
-                + " and lower(table_name) not in ('session','message','category','file_view',"
-                + "'evaluation_run','eval_case_result','trace_span')"
-                + " order by table_name";
-        List<String> lines = jdbc.queryForList(sql, String.class);
-        return lines == null || lines.isEmpty() ? "" : String.join("\n", lines);
     }
 
     /**

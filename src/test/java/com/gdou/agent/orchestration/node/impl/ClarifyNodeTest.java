@@ -10,7 +10,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -21,7 +20,6 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -118,26 +116,6 @@ class ClarifyNodeTest {
 
         assertThat(state.getNeedClarify()).isTrue();
         assertThat(state.getQuestionToUser()).contains("「这次」指哪次考试？");
-    }
-
-    @Test
-    @DisplayName("库内口径词典注入 systemMessage，且声明优先于模型推断")
-    void glossaryInjected() {
-        doReturn(List.of("-- orders：GMV = SUM(pay_amount)，时间字段用 pay_time"))
-                .when(jdbc).queryForList(anyString(), eq(String.class));
-        when(llmClient.call(anyList())).thenReturn(
-                "{\"clarified_question\":\"GMV\",\"assumptions\":[\"GMV = SUM(pay_amount)\"],"
-                        + "\"need_clarify\":false,\"question_to_user\":null}");
-
-        node.apply(state, CTX);
-
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<Message>> captor = ArgumentCaptor.forClass(List.class);
-        verify(llmClient).call(captor.capture());
-        String system = ((SystemMessage) captor.getValue().get(0)).getText();
-        assertThat(system).contains("库内口径词典")
-                .contains("GMV = SUM(pay_amount)，时间字段用 pay_time")
-                .contains("最高优先级");
     }
 
     @Test
